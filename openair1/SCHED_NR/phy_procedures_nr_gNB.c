@@ -951,7 +951,7 @@ static void handle_pucch(PHY_VARS_gNB *gNB, c16_t **rxdataF, const NR_gNB_PUCCH_
   }
 }
 
-static bool handle_pusch_decode_trigger(PHY_VARS_gNB *gNB, NR_gNB_PUSCH *pusch_vars, NR_gNB_ULSCH_t *ulsch, NR_UL_IND_t *UL_INFO, int *pusch_DTX)
+static void handle_pusch_rx_trigger(PHY_VARS_gNB *gNB, NR_gNB_PUSCH *pusch_vars, NR_gNB_ULSCH_t *ulsch)
 {
   NR_UL_gNB_HARQ_t *ulsch_harq = ulsch->harq_process;
   AssertFatal(ulsch_harq != NULL, "harq_pid %d is not allocated\n", ulsch->harq_pid);
@@ -998,6 +998,19 @@ static bool handle_pusch_decode_trigger(PHY_VARS_gNB *gNB, NR_gNB_PUSCH *pusch_v
     pusch_vars->ulsch_power_tot += pusch_vars->ulsch_power[aarx];
     pusch_vars->ulsch_noise_power_tot += pusch_vars->ulsch_noise_power[aarx];
   }
+  stop_meas(&gNB->rx_pusch_stats);
+}
+
+static bool handle_pusch_DTX(PHY_VARS_gNB *gNB,
+                             NR_gNB_PUSCH *pusch_vars,
+                             NR_gNB_ULSCH_t *ulsch,
+                             NR_UL_IND_t *UL_INFO,
+                             int *pusch_DTX)
+{
+  NR_UL_gNB_HARQ_t *ulsch_harq = ulsch->harq_process;
+  AssertFatal(ulsch_harq != NULL, "harq_pid %d is not allocated\n", ulsch->harq_pid);
+  const nfapi_nr_pusch_pdu_t *pdu = &ulsch_harq->ulsch_pdu;
+
   if (dB_fixed_x10(pusch_vars->ulsch_power_tot) < dB_fixed_x10(pusch_vars->ulsch_noise_power_tot) + gNB->pusch_thres) {
     NR_gNB_PHY_STATS_t *stats = get_phy_stats(gNB, ulsch->rnti);
 
@@ -1033,7 +1046,6 @@ static bool handle_pusch_decode_trigger(PHY_VARS_gNB *gNB, NR_gNB_PUSCH *pusch_v
 
     pusch_vars->DTX = 0;
   }
-  stop_meas(&gNB->rx_pusch_stats);
 
   return true;
 }
@@ -1214,7 +1226,8 @@ int phy_procedures_gNB_uespec_RX(PHY_VARS_gNB *gNB, int frame_rx, int slot_rx, N
       continue;
     NR_gNB_PUSCH *pusch_vars = &gNB->pusch_vars[ULSCH_id];
     NR_gNB_ULSCH_t *ulsch = &gNB->ulsch[ULSCH_id];
-    if (handle_pusch_decode_trigger(gNB, pusch_vars, ulsch, UL_INFO, &pusch_DTX))
+    handle_pusch_rx_trigger(gNB, pusch_vars, ulsch);
+    if (handle_pusch_DTX(gNB, pusch_vars, ulsch, UL_INFO, &pusch_DTX))
       ulsch_idx_to_decode[num_pusch++] = ULSCH_id;
   }
 
