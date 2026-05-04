@@ -958,6 +958,38 @@ static void handle_pucch(PHY_VARS_gNB *gNB, c16_t **rxdataF, const NR_gNB_PUCCH_
   }
 }
 
+#ifdef DEBUG_RXDATA
+static void dump_pusch_rx_data(PHY_VARS_gNB *gNB, NR_gNB_ULSCH_t *ulsch, const nfapi_nr_pusch_pdu_t *pdu)
+{
+  NR_DL_FRAME_PARMS *frame_parms = &gNB->frame_parms;
+  RU_t *ru = gNB->RU_list[0];
+  int slot_offset = get_samples_slot_timestamp(frame_parms, ulsch->slot);
+  slot_offset -= ru->N_TA_offset;
+  int32_t sample_offset = gNB->common_vars.debugBuff_sample_offset;
+  int16_t *buf = (int16_t *)&gNB->common_vars.debugBuff[sample_offset];
+  buf[0] = (int16_t)ulsch->rnti;
+  buf[1] = (int16_t)pdu->rb_size;
+  buf[2] = (int16_t)pdu->rb_start;
+  buf[3] = (int16_t)pdu->nr_of_symbols;
+  buf[4] = (int16_t)pdu->start_symbol_index;
+  buf[5] = (int16_t)pdu->mcs_index;
+  buf[6] = (int16_t)pdu->pusch_data.rv_index;
+  buf[7] = (int16_t)ulsch->harq_pid;
+  memcpy(&gNB->common_vars.debugBuff[gNB->common_vars.debugBuff_sample_offset + 4],
+         &ru->common.rxdata[0][slot_offset],
+         get_samples_per_slot(ulsch->slot, frame_parms) * sizeof(int32_t));
+  gNB->common_vars.debugBuff_sample_offset += (get_samples_per_slot(ulsch->slot, frame_parms) + 1000 + 4);
+  if (gNB->common_vars.debugBuff_sample_offset > ((get_samples_per_slot(ulsch->slot, frame_parms) + 1000 + 2) * 20)) {
+    FILE *f = fopen("rxdata_buff.raw", "w");
+    if (f == NULL)
+      exit(1);
+    fwrite((int16_t *)gNB->common_vars.debugBuff, 2, (get_samples_per_slot(ulsch->slot, frame_parms) + 1000 + 4) * 20 * 2, f);
+    fclose(f);
+    exit(-1);
+  }
+}
+#endif
+
 static void handle_pusch_rx_group_trigger(PHY_VARS_gNB *gNB,
                                           NR_gNB_PUSCH **pusch_vars_group,
                                           NR_gNB_ULSCH_t **ulsch_group,
@@ -971,36 +1003,7 @@ static void handle_pusch_rx_group_trigger(PHY_VARS_gNB *gNB,
     const nfapi_nr_pusch_pdu_t *pdu = &ulsch_harq->ulsch_pdu;
 
 #ifdef DEBUG_RXDATA
-    RU_t *ru = gNB->RU_list[0];
-    int slot_offset = frame_parms->get_samples_slot_timestamp(ulsch->slot, frame_parms, 0);
-    slot_offset -= ru->N_TA_offset;
-    int32_t sample_offset = gNB->common_vars.debugBuff_sample_offset;
-    int16_t buf = (int16_t *)&gNB->common_vars.debugBuff[offset];
-    buf[0] = (int16_t)ulsch->rnti;
-    buf[1] = (int16_t)pdu->rb_size;
-    buf[2] = (int16_t)pdu->rb_start;
-    buf[3] = (int16_t)pdu->nr_of_symbols;
-    buf[4] = (int16_t)pdu->start_symbol_index;
-    buf[5] = (int16_t)pdu->mcs_index;
-    buf[6] = (int16_t)pdu->pusch_data.rv_index;
-    buf[7] = (int16_t)ulsch->harq_pid;
-    memcpy(&gNB->common_vars.debugBuff[gNB->common_vars.debugBuff_sample_offset + 4],
-           &ru->common.rxdata[0][slot_offset],
-           frame_parms->get_samples_per_slot(ulsch->slot, frame_parms) * sizeof(int32_t));
-    gNB->common_vars.debugBuff_sample_offset += (frame_parms->get_samples_per_slot(ulsch->slot, frame_parms) + 1000 + 4);
-    if (gNB->common_vars.debugBuff_sample_offset
-        > ((frame_parms->get_samples_per_slot(ulsch->slot, frame_parms) + 1000 + 2) * 20)) {
-      FILE *f;
-      f = fopen("rxdata_buff.raw", "w");
-      if (f == NULL)
-        exit(1);
-      fwrite((int16_t *)gNB->common_vars.debugBuff,
-             2,
-             (frame_parms->get_samples_per_slot(ulsch->slot, frame_parms) + 1000 + 4) * 20 * 2,
-             f);
-      fclose(f);
-      exit(-1);
-    }
+    dump_pusch_rx_data(gNB, ulsch, pdu);
 #endif
 
     start_meas(&gNB->rx_pusch_stats);
