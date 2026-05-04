@@ -92,12 +92,13 @@ void free_gNB_dlsch(NR_gNB_DLSCH_t *dlsch, uint16_t N_RB, const NR_DL_FRAME_PARM
     @param frame Frame number
     @param slot Slot number
 */
-int nr_rx_pusch_tp(PHY_VARS_gNB *gNB,
-                   NR_gNB_PUSCH *pusch_vars,
-                   const nfapi_nr_pusch_pdu_t *rel15_ul,
-                   uint32_t *ret_unav_res,
-                   uint32_t frame,
-                   uint8_t slot);
+int nr_rx_pusch_group_tp(PHY_VARS_gNB *gNB,
+                         NR_gNB_PUSCH **pusch_vars,
+                         const nfapi_nr_pusch_pdu_t **rel15_ul,
+                         uint32_t **ret_unav_res,
+                         uint8_t group_size,
+                         uint32_t frame,
+                         uint8_t slot);
 
 /*!
 \brief This function implements the idft transform precoding in PUSCH

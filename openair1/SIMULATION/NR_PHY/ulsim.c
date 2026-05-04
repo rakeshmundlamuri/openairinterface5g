@@ -1189,8 +1189,7 @@ int main(int argc, char *argv[])
     reset_meas(&gNB->pusch_extraction_stats);
     reset_meas(&gNB->pusch_channel_compensation_stats);
     reset_meas(&gNB->ulsch_llr_stats);
-    reset_meas(&gNB->ulsch_layer_demapping_stats);
-    reset_meas(&gNB->ulsch_unscrambling_stats);
+    reset_meas(&gNB->ulsch_layer_demapping_and_unscrambling_stats);
     reset_meas(&gNB->ulsch_decoding_stats);
     reset_meas(&gNB->ts_deinterleave);
     reset_meas(&gNB->ts_rate_unmatch);
@@ -1864,10 +1863,8 @@ int main(int argc, char *argv[])
       printStatIndent3(&gNB->pusch_channel_compensation_stats, "RX PUSCH channel compensation");
       gNB->ulsch_llr_stats.trials = gNB->rx_pusch_symbol_processing_stats.trials;
       printStatIndent3(&gNB->ulsch_llr_stats, "RX PUSCH LLR");
-      gNB->ulsch_layer_demapping_stats.trials = gNB->rx_pusch_symbol_processing_stats.trials;
-      printStatIndent3(&gNB->ulsch_layer_demapping_stats, "RX PUSCH layer demapping");
-      gNB->ulsch_unscrambling_stats.trials = gNB->rx_pusch_symbol_processing_stats.trials;
-      printStatIndent3(&gNB->ulsch_unscrambling_stats, "RX PUSCH unscrambling");
+      gNB->ulsch_layer_demapping_and_unscrambling_stats.trials = gNB->rx_pusch_symbol_processing_stats.trials;
+      printStatIndent3(&gNB->ulsch_layer_demapping_and_unscrambling_stats, "RX PUSCH layer demapping and unscrambling");
       printStatIndent(&gNB->ulsch_decoding_stats,"ULSCH total decoding time");
       gNB->ts_deinterleave.trials = n_trials;
       printStatIndent2(&gNB->ts_deinterleave, "ULSCH segment deinterleaving time");

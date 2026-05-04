@@ -992,31 +992,21 @@ static void dump_pusch_rx_data(PHY_VARS_gNB *gNB, NR_gNB_ULSCH_t *ulsch, const n
 
 static void handle_pusch_rx_group_trigger(PHY_VARS_gNB *gNB,
                                           NR_gNB_PUSCH **pusch_vars_group,
-                                          NR_gNB_ULSCH_t **ulsch_group,
-                                          int group_size)
+                                          const nfapi_nr_pusch_pdu_t **ulsch_pdu_group,
+                                          uint32_t **ret_unav_res_group,
+                                          int group_size,
+                                          uint32_t frame,
+                                          uint8_t slot)
 {
-  for (int u = 0; u < group_size; u++) {
-    NR_gNB_PUSCH *pusch_vars = pusch_vars_group[u];
-    NR_gNB_ULSCH_t *ulsch = ulsch_group[u];
-    NR_UL_gNB_HARQ_t *ulsch_harq = ulsch->harq_process;
-    AssertFatal(ulsch_harq != NULL, "harq_pid %d is not allocated\n", ulsch->harq_pid);
-    const nfapi_nr_pusch_pdu_t *pdu = &ulsch_harq->ulsch_pdu;
-
 #ifdef DEBUG_RXDATA
-    dump_pusch_rx_data(gNB, ulsch, pdu);
+  NR_gNB_ULSCH_t *ulsch = ulsch_group[0]; // fix this
+  const nfapi_nr_pusch_pdu_t *pdu = ulsch_pdu_group[0];
+  dump_pusch_rx_data(gNB, ulsch, pdu);
 #endif
 
-    start_meas(&gNB->rx_pusch_stats);
-    nr_rx_pusch_tp(gNB, pusch_vars, pdu, &ulsch->unav_res, ulsch->frame, ulsch->slot);
-    pusch_vars->ulsch_power_tot = 0;
-    pusch_vars->ulsch_noise_power_tot = 0;
-    const uint8_t num_sp_streams = pdu->param_v4.numSpatialStreamIndices;
-    for (int aarx = 0; aarx < num_sp_streams; aarx++) {
-      pusch_vars->ulsch_power_tot += pusch_vars->ulsch_power[aarx];
-      pusch_vars->ulsch_noise_power_tot += pusch_vars->ulsch_noise_power[aarx];
-    }
-    stop_meas(&gNB->rx_pusch_stats);
-  }
+  start_meas(&gNB->rx_pusch_stats);
+  nr_rx_pusch_group_tp(gNB, pusch_vars_group, ulsch_pdu_group, ret_unav_res_group, group_size, frame, slot);
+  stop_meas(&gNB->rx_pusch_stats);
 }
 
 static bool handle_pusch_DTX(PHY_VARS_gNB *gNB,
@@ -1263,18 +1253,18 @@ int phy_procedures_gNB_uespec_RX(PHY_VARS_gNB *gNB, int frame_rx, int slot_rx, N
   for (int i = 0; i < pusch_groups.n_active_groups; i++) {
     int g = pusch_groups.active_groups[i];
     int gsz = pusch_groups.size[g];
-    AssertFatal(gsz == 1, "Cannot handle group size > 1\n");
-
     NR_gNB_PUSCH *pusch_vars_group[gsz];
-    NR_gNB_ULSCH_t *ulsch_pdu_group[gsz];
+    const nfapi_nr_pusch_pdu_t *ulsch_pdu_group[gsz];
+    uint32_t *unav_res_group[gsz];
     // store pusch vars and ulsch pdu for group based processing
     for (int u = 0; u < gsz; u++) {
       int ulsch_id = pusch_groups.jobs[g][u];
       pusch_vars_group[u] = &gNB->pusch_vars[ulsch_id];
-      ulsch_pdu_group[u] = &gNB->ulsch[ulsch_id];
+      ulsch_pdu_group[u] = &gNB->ulsch[ulsch_id].harq_process->ulsch_pdu;
+      unav_res_group[u] = &gNB->ulsch[ulsch_id].unav_res;
     }
 
-    handle_pusch_rx_group_trigger(gNB, pusch_vars_group, ulsch_pdu_group, gsz);
+    handle_pusch_rx_group_trigger(gNB, pusch_vars_group, ulsch_pdu_group, unav_res_group, gsz, frame_rx, slot_rx);
 
     for (int u = 0; u < gsz; u++) {
       int ULSCH_id = pusch_groups.jobs[g][u];
