@@ -1338,6 +1338,12 @@ int main(int argc, char *argv[])
           srs_pdu->beamforming.prg_size = 1;
         }
 
+        // Fill FAPI PUSCH groups for 1 UE
+        UL_tti_req->n_group = 1;
+        nfapi_nr_ul_tti_request_number_of_groups_t *group = &UL_tti_req->groups_list[0];
+        group->n_ue = 1;
+        group->ue_list[0].pdu_idx = 0;
+
         /* load FAPI into RX of L1 */
         nr_save_ul_tti_req(gNB, &Sched_INFO->UL_tti_req);
 

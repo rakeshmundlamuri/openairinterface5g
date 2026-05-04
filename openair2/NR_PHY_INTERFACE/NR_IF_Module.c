@@ -486,6 +486,7 @@ void reset_sched_response(NR_Sched_Rsp_t *sched_response, int frame, int slot, i
   UL_tti_req->SFN = frame;
   UL_tti_req->Slot = slot;
   UL_tti_req->n_pdus = 0;
+  UL_tti_req->n_group = 0;
 
   nfapi_nr_tx_data_request_t *TX_req = &sched_response->TX_req;
   TX_req->SFN = frame;

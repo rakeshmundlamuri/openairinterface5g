@@ -115,6 +115,48 @@ static void copy_ul_tti_req(nfapi_nr_ul_tti_request_t *to, nfapi_nr_ul_tti_reque
     to->groups_list[i] = from->groups_list[i];
 }
 
+static void nr_schedule_pusch_fapi_groups(nfapi_nr_ul_tti_request_t *UL_tti_req)
+{
+  UL_tti_req->n_group = 0;
+  bool pdu_grouped[MAX_UL_PDUS_PER_SLOT] = {false};
+  for (int i = 0; i < UL_tti_req->n_pdus; i++) {
+    // We only group PUSCH PDUs
+    if (UL_tti_req->pdus_list[i].pdu_type != NFAPI_NR_UL_CONFIG_PUSCH_PDU_TYPE)
+      continue;
+    if (pdu_grouped[i])
+      continue;
+    nfapi_nr_ul_tti_request_number_of_groups_t *group = &UL_tti_req->groups_list[UL_tti_req->n_group];
+    group->n_ue = 0;
+    group->ue_list[group->n_ue++].pdu_idx = i;
+    pdu_grouped[i] = true;
+
+    nfapi_nr_pusch_pdu_t *pdu_i = &UL_tti_req->pdus_list[i].pusch_pdu;
+
+    // Group the UEs sharing the exact same resource blocks
+    for (int j = i + 1; j < UL_tti_req->n_pdus; j++) {
+      if (UL_tti_req->pdus_list[j].pdu_type != NFAPI_NR_UL_CONFIG_PUSCH_PDU_TYPE)
+        continue;
+      if (pdu_grouped[j])
+        continue;
+
+      nfapi_nr_pusch_pdu_t *pdu_j = &UL_tti_req->pdus_list[j].pusch_pdu;
+
+      // Check for resource overlap
+      bool same_alloc = (pdu_i->rb_start == pdu_j->rb_start) && (pdu_i->rb_size == pdu_j->rb_size)
+                        && (pdu_i->start_symbol_index == pdu_j->start_symbol_index)
+                        && (pdu_i->nr_of_symbols == pdu_j->nr_of_symbols) && (pdu_i->qam_mod_order == pdu_j->qam_mod_order);
+
+      // Check orthogonal DMRS ports
+      bool orthogonal_dmrs = ((pdu_i->dmrs_ports & pdu_j->dmrs_ports) == 0);
+      if (same_alloc && orthogonal_dmrs) {
+        group->ue_list[group->n_ue++].pdu_idx = j;
+        pdu_grouped[j] = true;
+      }
+    }
+    UL_tti_req->n_group++;
+  }
+}
+
 void gNB_dlsch_ulsch_scheduler(module_id_t module_idP, frame_t frame, slot_t slot, NR_Sched_Rsp_t *sched_info)
 {
   protocol_ctxt_t ctxt = {0};
@@ -231,6 +273,8 @@ void gNB_dlsch_ulsch_scheduler(module_id_t module_idP, frame_t frame, slot_t slo
   AssertFatal(MAX_NUM_CCs == 1, "only 1 CC supported\n");
   const int current_index = ul_buffer_index(frame, slot, slots_frame, gNB->UL_tti_req_ahead_size);
   copy_ul_tti_req(&sched_info->UL_tti_req, &gNB->UL_tti_req_ahead[0][current_index]);
+
+  nr_schedule_pusch_fapi_groups(&sched_info->UL_tti_req);
 
   stop_meas(&gNB->gNB_scheduler);
   NR_SCHED_UNLOCK(&gNB->sched_lock);

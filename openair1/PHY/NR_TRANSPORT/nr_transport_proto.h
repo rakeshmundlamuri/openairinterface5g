@@ -165,7 +165,9 @@ void nr_ulsch_shift_llr(int16_t **llr_layers, uint32_t nb_re, uint32_t rxdataF_e
 void nr_fill_ulsch(PHY_VARS_gNB *gNB,
                    int frame,
                    int slot,
-                   nfapi_nr_pusch_pdu_t *ulsch_pdu);
+                   nfapi_nr_pusch_pdu_t *ulsch_pdu,
+                   int16_t mu_group_idx,
+                   uint8_t mu_group_size);
 
 void nr_schedule_rx_prach(PHY_VARS_gNB *gNB, int SFN, int Slot, nfapi_nr_prach_pdu_t *prach_pdu);
 
