@@ -735,13 +735,13 @@ int main(int argc, char *argv[])
                         &tx_bandwidth,
                         &rx_bandwidth);
 
-  RC.gNB = (PHY_VARS_gNB **) malloc(sizeof(PHY_VARS_gNB *));
-  RC.gNB[0] = calloc(1,sizeof(PHY_VARS_gNB));
+  RC.gNB = (PHY_VARS_gNB **)malloc_or_fail(sizeof(PHY_VARS_gNB *));
+  RC.gNB[0] = calloc_or_fail(1, sizeof(PHY_VARS_gNB));
   gNB = RC.gNB[0];
   gNB->ofdm_offset_divisor = UINT_MAX;
   gNB->num_pusch_symbols_per_thread = 1;
   gNB->dmrs_num_antennas_per_thread = num_antennas_per_thread;
-  gNB->RU_list[0] = calloc(1, sizeof(**gNB->RU_list));
+  gNB->RU_list[0] = calloc_or_fail(1, sizeof(**gNB->RU_list));
   gNB->RU_list[0]->rfdevice.openair0_cfg = openair0_cfg;
 
   if (setAffinity == false)
@@ -763,11 +763,11 @@ int main(int argc, char *argv[])
   AssertFatal((gNB->if_inst = NR_IF_Module_init(0)) != NULL, "Cannot register interface");
   gNB->if_inst->NR_PHY_config_req = nr_phy_config_request;
 
-  s_interleaved = malloc(n_tx * sizeof(float *));
-  r_re = malloc(n_rx * sizeof(float *));
-  r_im = malloc(n_rx * sizeof(float *));
+  s_interleaved = malloc_or_fail(n_tx * sizeof(float *));
+  r_re = malloc_or_fail(n_rx * sizeof(float *));
+  r_im = malloc_or_fail(n_rx * sizeof(float *));
 
-  NR_ServingCellConfigCommon_t *scc = calloc(1,sizeof(*scc));;
+  NR_ServingCellConfigCommon_t *scc = calloc_or_fail(1, sizeof(*scc));
   prepare_scc(scc);
   uint64_t ssb_bitmap;
   fill_scc_sim(scc, &ssb_bitmap, N_RB_DL, N_RB_DL, mu, mu);
@@ -863,9 +863,9 @@ int main(int argc, char *argv[])
 
   /* no RU: need to have rxdata */
   c16_t **rxdata;
-  rxdata = malloc(n_rx * sizeof(*rxdata));
+  rxdata = malloc_or_fail(n_rx * sizeof(*rxdata));
   for (int i = 0; i < n_rx; ++i)
-    rxdata[i] = calloc(gNB->frame_parms.samples_per_frame, sizeof(**rxdata));
+    rxdata[i] = calloc_or_fail(gNB->frame_parms.samples_per_frame, sizeof(**rxdata));
 
   NR_BWP_Uplink_t *ubwp=secondaryCellGroup->spCellConfig->spCellConfigDedicated->uplinkConfig->uplinkBWP_ToAddModList->list.array[0];
 
@@ -903,7 +903,7 @@ int main(int argc, char *argv[])
                           &d_channel_coeffs_gpu);
   if (use_cuda) {
     int num_links = n_tx * n_rx;
-    h_channel_coeffs = (float *)malloc(num_links * UE2gNB->channel_length * sizeof(float2));
+    h_channel_coeffs = (float *)malloc_or_fail(num_links * UE2gNB->channel_length * sizeof(float2));
   }
 #endif
 
@@ -911,7 +911,7 @@ int main(int argc, char *argv[])
   printf("Pre-allocating padded host memory for the CPU channel pipeline...\n");
   const int max_padding_alloc = 256 - 1;
   size_t padded_tx_alloc_bytes = n_tx * (num_samples_alloc + max_padding_alloc) * 2 * sizeof(float);
-  h_tx_sig_pinned = malloc(padded_tx_alloc_bytes);
+  h_tx_sig_pinned = malloc_or_fail(padded_tx_alloc_bytes);
   if (h_tx_sig_pinned == NULL) {
     printf("Error: Failed to allocate host buffer for CPU path\n");
     exit(-1);
@@ -919,9 +919,9 @@ int main(int argc, char *argv[])
 #endif
 
   // Configure UE
-  nrPHY_vars_UE_g = malloc(sizeof(PHY_VARS_NR_UE **));
-  nrPHY_vars_UE_g[0] = malloc(sizeof(PHY_VARS_NR_UE *));
-  PHY_VARS_NR_UE *UE = calloc(1, sizeof(PHY_VARS_NR_UE));
+  nrPHY_vars_UE_g = malloc_or_fail(sizeof(PHY_VARS_NR_UE **));
+  nrPHY_vars_UE_g[0] = malloc_or_fail(sizeof(PHY_VARS_NR_UE *));
+  PHY_VARS_NR_UE *UE = calloc_or_fail(1, sizeof(PHY_VARS_NR_UE));
   nrPHY_vars_UE_g[0][0] = UE;
   UE->frame_parms = gNB->frame_parms;
   UE->frame_parms.nb_antennas_tx = n_tx;
@@ -1088,17 +1088,17 @@ int main(int argc, char *argv[])
   unsigned int available_bits = nr_get_G(nb_rb, nb_symb_sch, nb_re_dmrs, number_dmrs_symbols, unav_res, mod_order, precod_nbr_layers);
   uint8_t cw_buf[available_bits];
   memset(cw_buf, 0, available_bits);
-  UE->phy_sim_test_buf = calloc(1, (available_bits + 7) / 8);
+  UE->phy_sim_test_buf = calloc_or_fail(1, (available_bits + 7) / 8);
   printf("[ULSIM]: VALUE OF G: %u, TBS: %u\n", available_bits, TBS);
 
   int frame_length_complex_samples = gNB->frame_parms.samples_per_subframe * NR_NUMBER_OF_SUBFRAMES_PER_FRAME;
   for (int aatx = 0; aatx < n_tx; aatx++) {
-    s_interleaved[aatx] = calloc(1, frame_length_complex_samples * 2 * sizeof(float));
+    s_interleaved[aatx] = calloc_or_fail(1, frame_length_complex_samples * 2 * sizeof(float));
   }
 
   for (int aarx = 0; aarx < n_rx; aarx++) {
-    r_re[aarx] = calloc(1, frame_length_complex_samples * sizeof(float));
-    r_im[aarx] = calloc(1, frame_length_complex_samples * sizeof(float));
+    r_re[aarx] = calloc_or_fail(1, frame_length_complex_samples * sizeof(float));
+    r_im[aarx] = calloc_or_fail(1, frame_length_complex_samples * sizeof(float));
   }
 
   //for (int i=0;i<16;i++) printf("%f\n",gaussdouble(0.0,1.0));
@@ -1293,7 +1293,7 @@ int main(int argc, char *argv[])
         pusch_pdu->pusch_data.num_cb = 0;
         pusch_pdu->pusch_ptrs.ptrs_time_density = ptrs_time_density;
         pusch_pdu->pusch_ptrs.ptrs_freq_density = ptrs_freq_density;
-        pusch_pdu->pusch_ptrs.ptrs_ports_list = (nfapi_nr_ptrs_ports_t *)malloc(2 * sizeof(nfapi_nr_ptrs_ports_t));
+        pusch_pdu->pusch_ptrs.ptrs_ports_list = (nfapi_nr_ptrs_ports_t *)malloc_or_fail(2 * sizeof(nfapi_nr_ptrs_ports_t));
         pusch_pdu->pusch_ptrs.ptrs_ports_list[0].ptrs_re_offset = 0;
         pusch_pdu->maintenance_parms_v3.ldpcBaseGraph = get_BG(TBS, code_rate);
         pusch_pdu->param_v4.numSpatialStreamIndices = conf.pusch_AntennaPorts;
@@ -1388,7 +1388,8 @@ int main(int argc, char *argv[])
         pusch_config_pdu->pusch_data.harq_process_id = harq_pid;
         pusch_config_pdu->pusch_ptrs.ptrs_time_density = ptrs_time_density;
         pusch_config_pdu->pusch_ptrs.ptrs_freq_density = ptrs_freq_density;
-        pusch_config_pdu->pusch_ptrs.ptrs_ports_list = (nfapi_nr_ue_ptrs_ports_t *)malloc(2 * sizeof(nfapi_nr_ue_ptrs_ports_t));
+        pusch_config_pdu->pusch_ptrs.ptrs_ports_list =
+            (nfapi_nr_ue_ptrs_ports_t *)malloc_or_fail(2 * sizeof(nfapi_nr_ue_ptrs_ports_t));
         pusch_config_pdu->pusch_ptrs.ptrs_ports_list[0].ptrs_re_offset = 0;
         pusch_config_pdu->transform_precoding = transform_precoding;
         // if transform precoding is enabled
@@ -1512,7 +1513,7 @@ int main(int argc, char *argv[])
             random_channel(UE2gNB, 0);
             int num_links = UE2gNB->nb_tx * UE2gNB->nb_rx;
             if (h_channel_coeffs == NULL) {
-              h_channel_coeffs = (float *)malloc(num_links * 256 * sizeof(float2));
+              h_channel_coeffs = (float *)malloc_or_fail(num_links * 256 * sizeof(float2));
             }
 
             for (int link = 0; link < num_links; link++) {
@@ -1548,7 +1549,7 @@ int main(int argc, char *argv[])
           } else
 #endif
           {
-            float **tx_sig_for_cpu = malloc(n_tx * sizeof(float *));
+            float **tx_sig_for_cpu = malloc_or_fail(n_tx * sizeof(float *));
             float *h_tx_ptr = (float *)h_tx_sig_pinned;
             const int padding_len = UE2gNB->channel_length - 1;
             const int padded_slot_length = slot_length + padding_len;
