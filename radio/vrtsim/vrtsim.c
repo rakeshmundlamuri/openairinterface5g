@@ -114,6 +114,13 @@ typedef struct {
   cirdb_conf_t cir_conf;
 } ue_conf_t;
 
+typedef struct client_info_s {
+  int num_ues;
+  int gnb_num_tx_ant;
+  int gnb_num_rx_ant;
+  ue_conf_t ues[MAX_NUM_UES];
+} client_info_t;
+
 typedef struct {
   int role;
   char *connection_descriptor;
@@ -160,6 +167,11 @@ typedef struct {
   char *thread_pool_cores;
   char *shm_channel_name;
   int disable_timing_thread;
+
+  client_info_t client_info;
+  pthread_t ipc_thread;
+  bool run_ipc_thread;
+  int ipc_listen_fd;
 } vrtsim_state_t;
 
 static void histogram_add(histogram_t *histogram, double diff)
@@ -264,47 +276,122 @@ static void *vrtsim_timing_job(void *arg)
   return 0;
 }
 
-typedef struct client_info_s {
-  int num_ues;
-  int gnb_num_tx_ant;
-  int gnb_num_rx_ant;
-  ue_conf_t ues[MAX_NUM_UES];
-} client_info_t;
-/**
- * @brief Publishes the client information information to a file for the client to read.
- *
- * The server writes its client_info (number of RX antennas) to a file, which the client reads.
- * The server does not wait for the client to write back; the client can connect at any point.
- *
- * @param client_info The client information to publish.
- * @return The peer information (same as input, server is authoritative).
- */
-static void server_publish_client_info(client_info_t client_info, char *descriptor_file)
+static void *vrtsim_ipc_thread(void *arg)
 {
-  FILE *fp = fopen(descriptor_file, "wb");
-  AssertFatal(fp != NULL, "Failed to open client info file for writing: %s\n", strerror(errno));
-  size_t written = fwrite(&client_info, sizeof(client_info), 1, fp);
-  AssertFatal(written == 1, "Failed to write client info to file\n");
-  fclose(fp);
+  vrtsim_state_t *vrtsim_state = arg;
+  while (vrtsim_state->run_ipc_thread) {
+    fd_set read_fds;
+    FD_ZERO(&read_fds);
+    FD_SET(vrtsim_state->ipc_listen_fd, &read_fds);
+
+    struct timeval tv = {.tv_sec = 0, .tv_usec = 200000}; // 200ms timeout
+    int ret = select(vrtsim_state->ipc_listen_fd + 1, &read_fds, NULL, NULL, &tv);
+    if (ret < 0) {
+      if (errno == EINTR) continue;
+      break;
+    }
+    if (ret == 0) {
+      // Timeout, check run_ipc_thread again
+      continue;
+    }
+
+    int client_fd = accept(vrtsim_state->ipc_listen_fd, NULL, NULL);
+    if (client_fd < 0) {
+      if (errno == EINTR || !vrtsim_state->run_ipc_thread) {
+        break;
+      }
+      usleep(10000);
+      continue;
+    }
+
+    // Send client info structure
+    size_t total_sent = 0;
+    char *ptr = (char *)&vrtsim_state->client_info;
+    while (total_sent < sizeof(client_info_t)) {
+      ssize_t sent = write(client_fd, ptr + total_sent, sizeof(client_info_t) - total_sent);
+      if (sent < 0) {
+        if (errno == EINTR) {
+          continue;
+        }
+        LOG_E(HW, "Failed to send client info to client: %s\n", strerror(errno));
+        break;
+      }
+      total_sent += sent;
+    }
+    close(client_fd);
+  }
+  return NULL;
 }
 
-static client_info_t client_read_info(char *descriptor_file)
+/**
+ * @brief Publishes the client information to a Unix domain socket.
+ */
+static void server_publish_client_info(vrtsim_state_t *vrtsim_state)
+{
+  char *socket_path = vrtsim_state->connection_descriptor;
+  unlink(socket_path);
+
+  vrtsim_state->ipc_listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  AssertFatal(vrtsim_state->ipc_listen_fd >= 0, "Failed to create IPC socket: %s\n", strerror(errno));
+
+  struct sockaddr_un addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sun_family = AF_UNIX;
+  strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
+
+  int ret = bind(vrtsim_state->ipc_listen_fd, (struct sockaddr *)&addr, sizeof(addr));
+  AssertFatal(ret == 0, "Failed to bind IPC socket to %s: %s\n", socket_path, strerror(errno));
+
+  ret = listen(vrtsim_state->ipc_listen_fd, 10);
+  AssertFatal(ret == 0, "Failed to listen on IPC socket: %s\n", strerror(errno));
+
+  vrtsim_state->run_ipc_thread = true;
+  threadCreate(&vrtsim_state->ipc_thread, vrtsim_ipc_thread, vrtsim_state, "vrtsim_ipc", -1, OAI_PRIORITY_RT_MAX);
+  LOG_A(HW, "VRTSIM: Started IPC server on socket %s\n", socket_path);
+}
+
+static client_info_t client_read_info(char *socket_path)
 {
   client_info_t client_info;
   int tries = 0;
+  struct sockaddr_un addr;
+
+  memset(&addr, 0, sizeof(addr));
+  addr.sun_family = AF_UNIX;
+  strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
+
   while (tries < 10) {
-    FILE *fp = fopen(descriptor_file, "rb");
-    if (fp) {
-      size_t read = fread(&client_info, sizeof(client_info), 1, fp);
-      fclose(fp);
-      if (read == 1) {
-        return client_info;
+    int sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (sock_fd >= 0) {
+      if (connect(sock_fd, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
+        // Read client_info
+        size_t total_read = 0;
+        char *ptr = (char *)&client_info;
+        while (total_read < sizeof(client_info)) {
+          ssize_t r = read(sock_fd, ptr + total_read, sizeof(client_info) - total_read);
+          if (r < 0) {
+            if (errno == EINTR) {
+              continue;
+            }
+            break;
+          }
+          if (r == 0) {
+            break; // Connection closed by peer
+          }
+          total_read += r;
+        }
+        close(sock_fd);
+        if (total_read == sizeof(client_info)) {
+          return client_info;
+        }
+      } else {
+        close(sock_fd);
       }
     }
     sleep(1);
     tries++;
   }
-  AssertFatal(0, "Timeout waiting for client info\n");
+  AssertFatal(0, "Timeout waiting for client info on socket %s\n", socket_path);
   return client_info;
 }
 
@@ -421,16 +508,16 @@ static int vrtsim_connect(openair0_device_t *device)
           num_rx_streams);
     // Exchange peer info
 
-    client_info_t client_info = {
+    vrtsim_state->client_info = (client_info_t){
         .num_ues = vrtsim_state->num_ues,
         .gnb_num_tx_ant = device->openair0_cfg[0].tx_num_channels,
         .gnb_num_rx_ant = device->openair0_cfg[0].rx_num_channels,
     };
 
     for (int i = 0; i < vrtsim_state->num_ues; i++)
-      client_info.ues[i] = vrtsim_state->ue_conf[i];
+      vrtsim_state->client_info.ues[i] = vrtsim_state->ue_conf[i];
 
-    server_publish_client_info(client_info, vrtsim_state->connection_descriptor);
+    server_publish_client_info(vrtsim_state);
     if (vrtsim_state->num_ues > 0) {
       vrtsim_state->peer_tx_ant = vrtsim_state->ue_conf[0].tx_ant;
       vrtsim_state->peer_rx_ant = vrtsim_state->ue_conf[0].rx_ant;
@@ -946,12 +1033,16 @@ static void vrtsim_end(openair0_device_t *device)
     histogram_print(&vrtsim_state->chanmod_histogram, "VRTSIM: Channel modelling delay histogram");
   }
   if (vrtsim_state->role == ROLE_SERVER) {
-    int ret = remove(vrtsim_state->connection_descriptor);
-    if (ret != 0) {
-      LOG_E(HW, "Failed to remove connection descriptor file %s: %s\n", vrtsim_state->connection_descriptor, strerror(errno));
-    } else {
-      LOG_A(HW, "Removed connection descriptor file %s\n", vrtsim_state->connection_descriptor);
+    if (vrtsim_state->run_ipc_thread) {
+      vrtsim_state->run_ipc_thread = false;
+      if (vrtsim_state->ipc_listen_fd >= 0) {
+        close(vrtsim_state->ipc_listen_fd);
+        vrtsim_state->ipc_listen_fd = -1;
+      }
+      int ret = pthread_join(vrtsim_state->ipc_thread, NULL);
+      AssertFatal(ret == 0, "pthread_join() failed: errno: %d, %s\n", errno, strerror(errno));
     }
+    unlink(vrtsim_state->connection_descriptor);
   }
   free(device->priv);
   device->priv = NULL;
@@ -1015,6 +1106,7 @@ __attribute__((__visibility__("default"))) int device_init(openair0_device_t *de
   device->priv = vrtsim_state;
   device->trx_write_init = vrtsim_stub;
   vrtsim_state->last_received_sample = 0;
+  vrtsim_state->ipc_listen_fd = -1;
   vrtsim_state->sample_rate = openair0_cfg->sample_rate;
   vrtsim_state->rx_freq = openair0_cfg->rx_freq[0];
   vrtsim_state->tx_bw = openair0_cfg->tx_bw;
