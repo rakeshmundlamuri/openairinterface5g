@@ -287,7 +287,8 @@ static void *vrtsim_ipc_thread(void *arg)
     struct timeval tv = {.tv_sec = 0, .tv_usec = 200000}; // 200ms timeout
     int ret = select(vrtsim_state->ipc_listen_fd + 1, &read_fds, NULL, NULL, &tv);
     if (ret < 0) {
-      if (errno == EINTR) continue;
+      if (errno == EINTR)
+        continue;
       break;
     }
     if (ret == 0) {
@@ -736,6 +737,9 @@ static int vrtsim_write_with_chanmod(vrtsim_state_t *vrtsim_state,
     num_chan_desc = vrtsim_state->num_ues;
   }
   int rx_antenna_offset = 0;
+  if (vrtsim_state->role == ROLE_CLIENT) {
+    rx_antenna_offset = vrtsim_state->ue_id * vrtsim_state->peer_rx_ant;
+  }
   int nb_tx = nbAnt;
   for (int i = 0; i < num_chan_desc; i++) {
     channel_desc_t *chan_desc = NULL;
@@ -881,7 +885,7 @@ static int vrtsim_write(openair0_device_t *device,
   // We map the antennas in order: first TX stream is mapped to first RX stream and so on.
   if (vrtsim_state->role == ROLE_CLIENT) {
     for (int aatx = 0; aatx < nbAnt && aatx < vrtsim_state->peer_rx_ant; aatx++) {
-      int global_ul_ant = vrtsim_state->ue.tx_offset + aatx;
+      int global_ul_ant = vrtsim_state->ue_id * vrtsim_state->peer_rx_ant + aatx;
       vrtsim_write_internal(vrtsim_state, timestamp, (c16_t *)samplesVoid[aatx], nsamps, global_ul_ant);
     }
     return nsamps;

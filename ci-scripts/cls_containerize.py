@@ -401,7 +401,7 @@ class Containerize():
 		# I would like to run it with --rm and mount the ctest result directory to avoid 'docker cp'
 		# below, but then permissions are messed up and we can't remove the directory without sudo
 		# making the next pipeline fail
-		ret = cmd.run(f'docker run -a STDOUT {runtime_opt} --workdir /oai-ran/build/ --env LD_LIBRARY_PATH=/oai-ran/build/ --name ran-unittests ran-unittests:{baseTag} ctest --no-label-summary -j$(nproc) {ctest_opt}')
+		ret = cmd.run(f'docker run -a STDOUT {runtime_opt} --shm-size=2g --workdir /oai-ran/build/ --env LD_LIBRARY_PATH=/oai-ran/build/ --name ran-unittests ran-unittests:{baseTag} ctest --no-label-summary -j$(nproc) {ctest_opt}')
 		cmd.run('docker cp ran-unittests:/oai-ran/build/Testing/Temporary/LastTest.log .')
 		archiveArtifact(cmd, ctx, f'{lSourcePath}/LastTest.log')
 		cmd.run('docker cp ran-unittests:/oai-ran/build/Testing/Temporary/LastTestsFailed.log .')
