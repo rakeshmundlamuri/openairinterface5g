@@ -45,8 +45,8 @@
 #define ZMQ_TX_CHANNELS "tx_channels"
 #define ZMQ_RX_CHANNELS "rx_channels"
 
-#define ZMQ_PARAMS_DESC                                                                                                           \
-  {                                                                                                                               \
+#define ZMQ_PARAMS_DESC                                                                                                            \
+  {                                                                                                                                \
       STRINGLISTPARAM(ZMQ_TX_CHANNELS, "list of zmq addresses represeting tx channels_\n", PARAMFLAG_MANDATORY, nullptr, nullptr), \
       STRINGLISTPARAM(ZMQ_RX_CHANNELS, "list of zmq addresses represeting rx channels_\n", PARAMFLAG_MANDATORY, nullptr, nullptr), \
   };

@@ -172,9 +172,7 @@ void cirdb_connect(int id,
 
   /* Selection request */
   int want_model_id = sel->want_model_id;
-  AssertFatal(want_model_id >= 0 && want_model_id <= 4,
-            "Invalid model_id=%d (valid: 0..4)\n",
-            want_model_id);
+  AssertFatal(want_model_id >= 0 && want_model_id <= 4, "Invalid model_id=%d (valid: 0..4)\n", want_model_id);
   float want_ds = (sel && sel->want_ds_ns > 0) ? sel->want_ds_ns : -1.0f;
   float want_speed = (sel && sel->want_speed_mps > 0) ? sel->want_speed_mps : -1.0f;
 

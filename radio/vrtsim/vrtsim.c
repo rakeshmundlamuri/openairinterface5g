@@ -252,7 +252,7 @@ static void *vrtsim_timing_job(void *arg)
       exit(1);
     }
     int64_t diff = (current_time.tv_sec - vrtsim_state->start_ts.tv_sec) * 1000000000
-                    + (current_time.tv_nsec - vrtsim_state->start_ts.tv_nsec);
+                   + (current_time.tv_nsec - vrtsim_state->start_ts.tv_nsec);
     double sample_index = vrtsim_state->sample_rate * vrtsim_state->timescale * diff / 1e9;
     int64_t samples_to_produce = sample_index - last_sample_index;
     if (samples_to_produce > 0) {
