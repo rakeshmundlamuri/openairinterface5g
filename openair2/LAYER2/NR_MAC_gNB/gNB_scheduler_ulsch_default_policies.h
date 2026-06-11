@@ -34,4 +34,6 @@ void nr_ul_port_select_default(gNB_MAC_INST *mac, nr_ul_candidate_t *candidates,
 
 void nr_ul_port_select_mu_mimo(gNB_MAC_INST *mac, nr_ul_candidate_t *candidates, int n_candidates);
 
+int nr_ul_proportional_fair_mu_mimo(const nr_ul_sched_params_t *params, nr_ul_candidate_t *candidates, int n_candidates);
+
 #endif /* GNB_SCHEDULER_ULSCH_DEFAULT_POLICIES_H */

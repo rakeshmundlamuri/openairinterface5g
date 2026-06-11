@@ -413,3 +413,196 @@ int nr_ul_proportional_fair(const nr_ul_sched_params_t *params, nr_ul_candidate_
 
   return n_scheduled;
 }
+
+int nr_ul_proportional_fair_mu_mimo(const nr_ul_sched_params_t *params, nr_ul_candidate_t *candidates, int n_candidates)
+{
+  int n_scheduled = 0;
+  const int min_rb = params->min_rb;
+
+  /* Build pointer array sorted by PF priority (retx first, then highest weight) */
+  nr_ul_candidate_t *order[MAX_MOBILES_PER_GNB];
+  int n_active = 0;
+  FOR_EACH_CANDIDATE(cand, candidates, n_candidates)
+  if (!cand->skipped)
+    order[n_active++] = cand;
+  qsort(order, n_active, sizeof(*order), compare_ul_pf_rb_ptrs);
+
+  /* Phase 1: HARQ retransmissions (highest priority, exact RBs) */
+  for (int j = 0; j < n_active; j++) {
+    nr_ul_candidate_t *cand = order[j];
+    if (!cand->is_retx)
+      continue;
+
+    int rbStart;
+    uint16_t *vrb_map = params->vrb_map_UL[cand->alloc_beam_idx];
+    int block_len = find_largest_free_block(vrb_map, cand->alloc_slbitmap, cand->bwp_start, cand->bwp_size, &rbStart);
+    if (block_len < cand->retx_rbSize)
+      continue;
+
+    COMMIT_UL_ALLOC(params, cand, rbStart, cand->retx_rbSize, cand->sched_pusch.mcs, n_scheduled);
+  }
+
+  /* Phase 2: Inactive UEs (no BSR data, need scheduling for TA/SR) */
+  for (int j = 0; j < n_active; j++) {
+    nr_ul_candidate_t *cand = order[j];
+    if (cand->is_retx || !cand->sched_inactive)
+      continue;
+
+    uint16_t *vrb_map = params->vrb_map_UL[cand->alloc_beam_idx];
+    int rbStart;
+    int block_len = find_largest_free_block(vrb_map, cand->alloc_slbitmap, cand->bwp_start, cand->bwp_size, &rbStart);
+    if (block_len < min_rb)
+      continue;
+
+    COMMIT_UL_ALLOC(params, cand, rbStart, min_rb, cand->sched_pusch.mcs, n_scheduled);
+  }
+
+  /* Phase 3: New data UEs — PF priority order, largest free block */
+  // State variables to track the first UE in an MU-MIMO pair
+  bool is_first_of_pair = true;
+  int shared_rbStart = -1;
+  uint16_t shared_rbSize = 0;
+  uint8_t shared_primary_mcs = 0;
+  uint8_t shared_primary_mcs_table = 0;
+
+  for (int j = 0; j < n_active; j++) {
+    nr_ul_candidate_t *cand = order[j];
+    if (cand->is_retx || cand->sched_inactive)
+      continue;
+
+    uint16_t final_rbSize;
+    int block_start;
+    uint8_t mcs = cand->sched_pusch.mcs;
+
+    NR_UE_UL_BWP_t *current_BWP = &cand->UE->current_UL_BWP;
+    NR_pusch_dmrs_t dmrs_info = get_ul_dmrs_params(params->scc,
+                                                   current_BWP,
+                                                   &cand->sched_pusch.tda_info,
+                                                   cand->sched_pusch.nrOfLayers,
+                                                   cand->sched_pusch.dmrs_info.dmrs_ports,
+                                                   cand->sched_pusch.dmrs_info.num_dmrs_cdm_grps_no_data);
+    uint16_t Rt;
+    uint8_t Qt;
+    update_ul_ue_R_Qm(mcs, current_BWP->mcs_table, current_BWP->pusch_Config, &Rt, &Qt);
+
+    bool acting_as_primary = is_first_of_pair;
+
+    if (is_first_of_pair) {
+      uint16_t *vrb_map = params->vrb_map_UL[cand->alloc_beam_idx];
+      int block_len = find_largest_free_block(vrb_map, cand->alloc_slbitmap, cand->bwp_start, cand->bwp_size, &block_start);
+      if (block_len < min_rb)
+        continue;
+
+      uint16_t rbSize = block_len;
+      if (cand->pcmax != 0 || cand->ph != 0) {
+        nr_ul_phr_advice_t advice;
+        if (!nr_ul_check_phr(params, cand, rbSize, mcs, &advice)) {
+          rbSize = advice.max_mcs_min_rb.rbSize;
+          mcs = advice.max_mcs_min_rb.mcs;
+          update_ul_ue_R_Qm(mcs, current_BWP->mcs_table, current_BWP->pusch_Config, &Rt, &Qt);
+        }
+      }
+
+      uint32_t tb_size;
+      nr_find_nb_rb(Qt,
+                    Rt,
+                    current_BWP->transform_precoding,
+                    cand->sched_pusch.nrOfLayers,
+                    cand->sched_pusch.tda_info.nrOfSymbols,
+                    dmrs_info.N_PRB_DMRS * dmrs_info.num_dmrs_symb,
+                    cand->pending_bytes,
+                    min_rb,
+                    rbSize,
+                    &tb_size,
+                    &final_rbSize);
+
+      /* NOTE: shared_* and is_first_of_pair are updated AFTER commit below */
+
+    } else {
+      /* ── Secondary candidate: check QAM order before forcing overlap ──
+       *
+       * nr_schedule_pusch_fapi_groups requires qam_mod_order to match for
+       * MU-MIMO grouping.  If Qm differs, the PHY would get two separate
+       * groups on the same RBs with no interference cancellation → ULSCH
+       * errors.  Fall back to scheduling this UE as a fresh primary instead.
+       */
+      uint8_t primary_qm = nr_get_Qm_ul(shared_primary_mcs, shared_primary_mcs_table);
+      uint8_t secondary_qm = nr_get_Qm_ul(mcs, current_BWP->mcs_table);
+
+      if (primary_qm != secondary_qm) {
+        LOG_D(NR_MAC,
+              "[UE %04x] MU-MIMO: Qm mismatch (primary Qm=%d != secondary Qm=%d)"
+              " — scheduling SU-MIMO\n",
+              cand->UE->rnti,
+              primary_qm,
+              secondary_qm);
+
+        /* Treat this UE as a new primary: find its own free block */
+        acting_as_primary = true;
+        is_first_of_pair = true; /* reset so state update below is correct */
+
+        uint16_t *vrb_map = params->vrb_map_UL[cand->alloc_beam_idx];
+        int block_len = find_largest_free_block(vrb_map, cand->alloc_slbitmap, cand->bwp_start, cand->bwp_size, &block_start);
+        if (block_len < min_rb)
+          continue;
+
+        uint16_t rbSize = block_len;
+        if (cand->pcmax != 0 || cand->ph != 0) {
+          nr_ul_phr_advice_t advice;
+          if (!nr_ul_check_phr(params, cand, rbSize, mcs, &advice)) {
+            rbSize = advice.max_mcs_min_rb.rbSize;
+            mcs = advice.max_mcs_min_rb.mcs;
+            update_ul_ue_R_Qm(mcs, current_BWP->mcs_table, current_BWP->pusch_Config, &Rt, &Qt);
+          }
+        }
+
+        uint32_t tb_size;
+        nr_find_nb_rb(Qt,
+                      Rt,
+                      current_BWP->transform_precoding,
+                      cand->sched_pusch.nrOfLayers,
+                      cand->sched_pusch.tda_info.nrOfSymbols,
+                      dmrs_info.N_PRB_DMRS * dmrs_info.num_dmrs_symb,
+                      cand->pending_bytes,
+                      min_rb,
+                      rbSize,
+                      &tb_size,
+                      &final_rbSize);
+
+      } else {
+        /* Qm matches: force the same RBs as the primary */
+        block_start = shared_rbStart;
+        final_rbSize = shared_rbSize;
+
+        if (cand->pcmax != 0 || cand->ph != 0) {
+          nr_ul_phr_advice_t advice;
+          if (!nr_ul_check_phr(params, cand, final_rbSize, mcs, &advice)) {
+            mcs = advice.same_rb_min_mcs.mcs; /* keep RBs, drop MCS if power-limited */
+          }
+        }
+      }
+    }
+
+    /* COMMIT: validates CCE and marks vrb_map. For a true secondary the
+     * bitwise-OR onto already-marked RBs is idempotent and correct. */
+    COMMIT_UL_ALLOC(params, cand, block_start, final_rbSize, mcs, n_scheduled);
+
+    /* ── Update pairing state AFTER commit so a failed CCE doesn't corrupt
+     *    shared_rbStart/shared_rbSize for the next candidate ── */
+    if (acting_as_primary) {
+      if (cand->scheduled) {
+        /* Primary committed OK — record allocation for the next secondary */
+        shared_rbStart = block_start;
+        shared_rbSize = final_rbSize;
+        shared_primary_mcs = mcs;
+        shared_primary_mcs_table = current_BWP->mcs_table;
+        is_first_of_pair = false;
+      }
+      /* else: CCE failed — leave is_first_of_pair=true, try next candidate */
+    } else {
+      /* Secondary committed (or failed) — either way open a new primary slot */
+      is_first_of_pair = true;
+    }
+  }
+  return n_scheduled;
+}
