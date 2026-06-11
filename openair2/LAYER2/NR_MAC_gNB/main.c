@@ -301,11 +301,16 @@ void mac_top_init_gNB(ngran_node_t node_type,
       uid_linear_allocator_init(&RC.nrmac[i]->UE_info.uid_allocator);
 
       RC.nrmac[i]->ul_ri_tpmi_select = nr_ul_ri_tpmi_select_default;
-      RC.nrmac[i]->ul_port_select = nr_ul_port_select_default;
       RC.nrmac[i]->ul_tda_select = nr_ul_tda_select_default;
       RC.nrmac[i]->ul_beam_select = nr_ul_beam_select_default;
       RC.nrmac[i]->ul_mcs_select = nr_ul_mcs_select_default;
-      RC.nrmac[i]->ul_rb_alloc = nr_ul_proportional_fair;
+      if (get_softmodem_params()->ul_mu_mimo) {
+        RC.nrmac[i]->ul_port_select = nr_ul_port_select_mu_mimo;
+        RC.nrmac[i]->ul_rb_alloc = nr_ul_proportional_fair_mu_mimo;
+      } else {
+        RC.nrmac[i]->ul_port_select = nr_ul_port_select_default;
+        RC.nrmac[i]->ul_rb_alloc = nr_ul_proportional_fair;
+      }
 
       RC.nrmac[i]->dl_lcid_alloc = nr_dl_lcid_alloc_default;
 

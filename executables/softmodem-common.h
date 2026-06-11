@@ -34,6 +34,7 @@ extern "C"
 #define CONFIG_HLP_DUMPFRAME     "dump UE received frame to rxsig_frame0.dat and exit\n"
 #define CONFIG_HLP_PHYTST        "test UE phy layer, mac disabled\n"
 #define CONFIG_HLP_DORA          "test gNB  and UE with RA procedures\n"
+#define CONFIG_HLP_ULMUMIMO      "Use uplink MU MIMO scenario\n"
 #define CONFIG_HLP_SL_MODE       "sets the NR sidelink mode (0: not in sidelink mode, 1: in-coverage/gNB, 2: out-of-coverage/no gNB)\n"
 #define CONFIG_HLP_CLK           "tells hardware to use a clock reference (0:internal, 1:external, 2:gpsdo)\n"
 #define CONFIG_HLP_TME           "tells hardware to use a time reference (0:internal, 1:external, 2:gpsdo)\n"
@@ -86,6 +87,7 @@ extern "C"
 #define CONTINUOUS_TX       softmodem_params.continuous_tx
 #define PHY_TEST            softmodem_params.phy_test
 #define DO_RA               softmodem_params.do_ra
+#define UL_MU_MIMO          softmodem_params.ul_mu_mimo
 #define SL_MODE             softmodem_params.sl_mode
 #define CHAIN_OFFSET        softmodem_params.chain_offset
 #define NUMEROLOGY          softmodem_params.numerology
@@ -110,6 +112,7 @@ extern int usrp_tx_thread;
   {"thread-pool",           CONFIG_HLP_TPOOL,         0,              .strptr=&TP_CONFIG,                     .defstrval="-1,-1,-1,-1,-1,-1,-1,-1",  TYPE_STRING, 0},     \
   {"phy-test",              CONFIG_HLP_PHYTST,        PARAMFLAG_BOOL, .iptr=&PHY_TEST,                        .defintval=0,             TYPE_INT,    0},  \
   {"do-ra",                 CONFIG_HLP_DORA,          PARAMFLAG_BOOL, .iptr=&DO_RA,                           .defintval=0,             TYPE_INT,    0},  \
+  {"ul-mu-mimo",            CONFIG_HLP_ULMUMIMO,      PARAMFLAG_BOOL, .iptr=&UL_MU_MIMO,                      .defintval=0,             TYPE_INT,    0},  \
   {"sl-mode",               CONFIG_HLP_SL_MODE,       0,              .u8ptr=&SL_MODE,                        .defintval=0,             TYPE_UINT8,  0},  \
   {"clock-source",          CONFIG_HLP_CLK,           0,              .uptr=&CLOCK_SOURCE,                    .defintval=0,             TYPE_UINT,   0},  \
   {"time-source",           CONFIG_HLP_TME,           0,              .uptr=&TIMING_SOURCE,                   .defintval=0,             TYPE_UINT,   0},  \
@@ -147,6 +150,7 @@ extern int usrp_tx_thread;
 
 // clang-format off
 #define CMDLINE_PARAMS_CHECK_DESC {         \
+    { .s5 = { NULL } },                     \
     { .s5 = { NULL } },                     \
     { .s5 = { NULL } },                     \
     { .s5 = { NULL } },                     \
@@ -272,6 +276,7 @@ typedef struct {
   char *threadPoolConfig;
   int            phy_test;
   int            do_ra;
+  int            ul_mu_mimo;
   uint8_t        sl_mode;
   int            chain_offset;
   int            numerology;
