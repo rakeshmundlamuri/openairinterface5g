@@ -54,6 +54,74 @@ void nr_ul_port_select_default(gNB_MAC_INST *mac, nr_ul_candidate_t *cands, int 
   }
 }
 
+void nr_ul_port_select_mu_mimo(gNB_MAC_INST *mac, nr_ul_candidate_t *cands, int n_cand)
+{
+  uint16_t allocated_ports = 0;
+
+  /* Retransmissions MUST keep their original ports */
+  FOR_EACH_CANDIDATE(cand, cands, n_cand)
+  {
+    if (cand->skipped || !cand->is_retx)
+      continue;
+
+    const NR_sched_pusch_t *retInfo = &cand->UE->UE_sched_ctrl.ul_harq_processes[cand->retx_harq_pid].sched_pusch;
+    cand->sched_pusch.dmrs_info.dmrs_ports = retInfo->dmrs_info.dmrs_ports;
+    cand->sched_pusch.dmrs_info.num_dmrs_cdm_grps_no_data = retInfo->dmrs_info.num_dmrs_cdm_grps_no_data;
+
+    allocated_ports |= cand->sched_pusch.dmrs_info.dmrs_ports;
+  }
+
+  /* Assign strictly valid 3GPP DMRS port combinations */
+  FOR_EACH_CANDIDATE(cand, cands, n_cand)
+  {
+    if (cand->skipped || cand->is_retx)
+      continue;
+
+    int layers = cand->sched_pusch.nrOfLayers;
+    cand->sched_pusch.dmrs_info.num_dmrs_cdm_grps_no_data = 2;
+
+    // Define strictly valid 3GPP DMRS Type 1 bitmasks
+    uint16_t valid_masks_1_layer[] = {0x01, 0x02, 0x04, 0x08};
+    uint16_t valid_masks_2_layers[] = {0x03, 0x0C};
+
+    uint16_t *masks_to_check = NULL;
+    int num_masks = 0;
+
+    // Fallback variable declared in the same scope so it survives the if/else block
+    uint16_t fallback_mask = 0;
+
+    if (layers == 1) {
+      masks_to_check = valid_masks_1_layer;
+      num_masks = 4;
+    } else if (layers == 2) {
+      masks_to_check = valid_masks_2_layers;
+      num_masks = 2;
+    } else {
+      // Fallback for 3+ layers
+      fallback_mask = (1 << layers) - 1;
+      masks_to_check = &fallback_mask;
+      num_masks = 1;
+    }
+
+    bool ports_assigned = false;
+
+    // Test valid masks against the allocated_ports registry
+    for (int i = 0; i < num_masks; i++) {
+      if ((allocated_ports & masks_to_check[i]) == 0) {
+        cand->sched_pusch.dmrs_info.dmrs_ports = masks_to_check[i];
+        allocated_ports |= masks_to_check[i];
+        ports_assigned = true;
+        break;
+      }
+    }
+
+    if (!ports_assigned) {
+      LOG_W(NR_MAC, "[UE %04x] MU-MIMO : Exhausted DMRS ports, skipping UE\n", cand->UE->rnti);
+      cand->skipped = true;
+    }
+  }
+}
+
 static NR_tda_info_t *get_new_tda_for_srs(gNB_MAC_INST *nrmac, const NR_tda_info_t *tda_info)
 {
   // by current design, the next TDA would be the one for SRS with one less symbol
