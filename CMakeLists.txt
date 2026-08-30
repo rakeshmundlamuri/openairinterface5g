@@ -912,6 +912,7 @@ set(PHY_SRC_UE
 
   set(PHY_NR_SRC_COMMON
   ${OPENAIR1_DIR}/PHY/CODING/nr_segmentation.c
+  ${OPENAIR1_DIR}/PHY/NR_TRANSPORT/nr_custom_signal.c
   ${OPENAIR1_DIR}/PHY/NR_TRANSPORT/nr_tbs_tools.c
   ${OPENAIR1_DIR}/PHY/NR_TRANSPORT/nr_prach_common.c
   ${OPENAIR1_DIR}/PHY/nr_phy_common/src/nr_phy_common_csirs.c

@@ -77,6 +77,14 @@ extern "C"
   "Set RF board timing_advance to compensate fix delay inside the RF board between Rx and Tx timestamps (RF board internal " \
   "issues)\n"
 
+#define CONFIG_HLP_CUSTOM_RE_EN     "enable the custom RE test signal (writes/reads known IQ values in a dedicated DL slot)\n"
+#define CONFIG_HLP_CUSTOM_RE_IQF    "path to the file of \"re,im\" IQ values (one per line, floats in [-1,1]) for the custom RE test signal\n"
+#define CONFIG_HLP_CUSTOM_RE_FRAME  "firing period in frames for the custom RE test signal (0 = every frame)\n"
+#define CONFIG_HLP_CUSTOM_RE_SLOT   "slot within the frame reserved for the custom RE test signal\n"
+#define CONFIG_HLP_CUSTOM_RE_SYMB   "OFDM symbol index within the slot for the custom RE test signal\n"
+#define CONFIG_HLP_CUSTOM_RE_STARTSC "first subcarrier index for the custom RE test signal\n"
+#define CONFIG_HLP_CUSTOM_RE_NUMRE  "number of consecutive REs for the custom RE test signal\n"
+
 /*-----------------------------------------------------------------------------------------------------------------------------------------------------*/
 /*                                            command line parameters common to eNodeB and UE                                                          */
 /*   optname                 helpstr                  paramflags      XXXptr                              defXXXval              type         numelt   */
@@ -102,6 +110,13 @@ extern "C"
 #define CONTINUOUS_TX       softmodem_params.continuous_tx
 #define SYNC_REF            softmodem_params.sync_ref
 #define DEFAULT_PDU_ID      softmodem_params.default_pdu_session_id
+#define CUSTOM_RE_ENABLE    softmodem_params.custom_re_enable
+#define CUSTOM_RE_IQFILE    softmodem_params.custom_re_iqfile
+#define CUSTOM_RE_FRAME     softmodem_params.custom_re_frame
+#define CUSTOM_RE_SLOT      softmodem_params.custom_re_slot
+#define CUSTOM_RE_SYMBOL    softmodem_params.custom_re_symbol
+#define CUSTOM_RE_START_SC  softmodem_params.custom_re_start_sc
+#define CUSTOM_RE_NUM_RE    softmodem_params.custom_re_num_re
 
 extern int usrp_tx_thread;
 // clang-format off
@@ -142,6 +157,13 @@ extern int usrp_tx_thread;
   {"imscope" ,              CONFIG_HLP_IMSCOPE,       PARAMFLAG_BOOL, .uptr=&enable_imscope,                   .defintval=0,            TYPE_UINT,   0}, \
   {"imscope-record" ,       CONFIG_HLP_IMSCOPE_RECORD,PARAMFLAG_BOOL, .uptr=&enable_imscope_record,            .defintval=0,            TYPE_UINT,   0}, \
   {"default-pdu-id",        NULL,                     0,              .iptr=&DEFAULT_PDU_ID,                   .defintval=-1,           TYPE_INT,    0}, \
+  {"custom-re-enable",      CONFIG_HLP_CUSTOM_RE_EN,  PARAMFLAG_BOOL, .iptr=&CUSTOM_RE_ENABLE,                 .defintval=0,             TYPE_INT,    0},  \
+  {"custom-re-iqfile",      CONFIG_HLP_CUSTOM_RE_IQF, 0,              .strptr=&CUSTOM_RE_IQFILE,               .defstrval=NULL,          TYPE_STRING, 0},  \
+  {"custom-re-frame",       CONFIG_HLP_CUSTOM_RE_FRAME, 0,            .iptr=&CUSTOM_RE_FRAME,                  .defintval=0,             TYPE_INT,    0},  \
+  {"custom-re-slot",        CONFIG_HLP_CUSTOM_RE_SLOT, 0,             .iptr=&CUSTOM_RE_SLOT,                   .defintval=0,             TYPE_INT,    0},  \
+  {"custom-re-symbol",      CONFIG_HLP_CUSTOM_RE_SYMB, 0,             .iptr=&CUSTOM_RE_SYMBOL,                 .defintval=13,            TYPE_INT,    0},  \
+  {"custom-re-startsc",     CONFIG_HLP_CUSTOM_RE_STARTSC, 0,          .iptr=&CUSTOM_RE_START_SC,               .defintval=0,             TYPE_INT,    0},  \
+  {"custom-re-numre",       CONFIG_HLP_CUSTOM_RE_NUMRE, 0,            .iptr=&CUSTOM_RE_NUM_RE,                 .defintval=12,            TYPE_INT,    0},  \
 }
 // clang-format on
 
@@ -176,6 +198,13 @@ extern int usrp_tx_thread;
                {"MONOLITHIC", "PNF", "VNF", "AERIAL","UE_STUB_PNF","UE_STUB_OFFNET","STANDALONE_PNF"}, \
                {NFAPI_MONOLITHIC, NFAPI_MODE_PNF, NFAPI_MODE_VNF, NFAPI_MODE_AERIAL,NFAPI_UE_STUB_PNF,NFAPI_UE_STUB_OFFNET,NFAPI_MODE_STANDALONE_PNF}, \
                7 } }, \
+    { .s5 = { NULL } },                     \
+    { .s5 = { NULL } },                     \
+    { .s5 = { NULL } },                     \
+    { .s5 = { NULL } },                     \
+    { .s5 = { NULL } },                     \
+    { .s5 = { NULL } },                     \
+    { .s5 = { NULL } },                     \
     { .s5 = { NULL } },                     \
     { .s5 = { NULL } },                     \
     { .s5 = { NULL } },                     \
@@ -294,6 +323,13 @@ typedef struct {
   int threequarter_fs;
   int default_pdu_session_id;
   int extra_pdu_session_id;
+  int custom_re_enable;
+  char *custom_re_iqfile;
+  int custom_re_frame;
+  int custom_re_slot;
+  int custom_re_symbol;
+  int custom_re_start_sc;
+  int custom_re_num_re;
 } softmodem_params_t;
 
 #define IS_SA_MODE(sM_params) (!(sM_params)->phy_test && !(sM_params)->do_ra && !(sM_params)->nsa)

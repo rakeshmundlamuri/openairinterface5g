@@ -131,6 +131,20 @@ void phy_init_nr_gNB(PHY_VARS_gNB *gNB)
   gNB->bad_pucch = 0;
   if (gNB->TX_AMP == 0)
     gNB->TX_AMP = AMP;
+
+  const softmodem_params_t *softmodem_params = get_softmodem_params();
+  gNB->custom_signal_cfg.enabled = softmodem_params->custom_re_enable;
+  if (gNB->custom_signal_cfg.enabled) {
+    gNB->custom_signal_cfg.target_frame = softmodem_params->custom_re_frame;
+    gNB->custom_signal_cfg.target_slot = softmodem_params->custom_re_slot;
+    gNB->custom_signal_cfg.symbol = softmodem_params->custom_re_symbol;
+    gNB->custom_signal_cfg.start_sc = softmodem_params->custom_re_start_sc;
+    gNB->custom_signal_cfg.num_re = softmodem_params->custom_re_num_re;
+    gNB->custom_signal_cfg.ant = 0;
+    int ret = nr_custom_signal_load_file(softmodem_params->custom_re_iqfile, gNB->TX_AMP, &gNB->custom_signal_cfg);
+    AssertFatal(ret == 0, "custom RE signal: failed to load IQ file %s\n", softmodem_params->custom_re_iqfile);
+  }
+
   // ceil(((NB_RB<<1)*3)/32) // 3 RE *2(QPSK)
   nr_generate_modulation_table();
   nr_init_pbch_interleaver(gNB->nr_pbch_interleaver);

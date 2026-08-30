@@ -21,6 +21,7 @@
 #include "common/utils/threadPool/task_ans.h"
 #include "openair1/PHY/defs_RU.h"
 #include "common/utils/ds/spsc_q.h"
+#include "PHY/NR_TRANSPORT/nr_custom_signal.h"
 
 #define MAX_NUM_RU_PER_gNB 8
 #define MAX_PUCCH0_NID 8
@@ -380,6 +381,7 @@ typedef struct PHY_VARS_gNB_s {
   // TODO: can we remove c from NR_gNB_DLSCH_t and put it on the stack?
   NR_gNB_DLSCH_t *dlsch;
   NR_gNB_PRS prs_vars;
+  nr_custom_signal_config_t custom_signal_cfg;
   NR_gNB_PUSCH *pusch_vars;
   spsc_q_t pucch_queue;
   spsc_q_t pusch_queue;

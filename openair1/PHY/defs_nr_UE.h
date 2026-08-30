@@ -18,6 +18,7 @@
 #include "defs_nr_common.h"
 #include "CODING/nrPolar_tools/nr_polar_pbch_defs.h"
 #include "PHY/defs_nr_sl_UE.h"
+#include "PHY/NR_TRANSPORT/nr_custom_signal.h"
 #include "openair1/PHY/nr_phy_common/inc/nr_ue_phy_meas.h"
 #include "common/utils/threadPool/task_ans.h"
 #include <stdio.h>
@@ -342,6 +343,7 @@ typedef struct PHY_VARS_NR_UE_s {
   NR_UE_PRACH *prach_vars[NUMBER_OF_CONNECTED_gNB_MAX];
   NR_UE_PRS *prs_vars[NR_MAX_PRS_COMB_SIZE];
   uint8_t prs_active_gNBs;
+  nr_custom_signal_config_t custom_signal_cfg;
   NR_DL_UE_HARQ_t dl_harq_processes[2][NR_MAX_HARQ_PROCESSES];
   NR_UL_UE_HARQ_t ul_harq_processes[NR_MAX_HARQ_PROCESSES];
 

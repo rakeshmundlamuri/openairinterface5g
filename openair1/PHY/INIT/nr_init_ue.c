@@ -162,6 +162,17 @@ int init_nr_ue_signal(PHY_VARS_NR_UE *ue, int nb_connected_gNB)
 
   LOG_I(PHY, "Initializing UE vars for gNB TXant %u, UE RXant %u\n", fp->nb_antennas_tx, fp->nb_antennas_rx);
 
+  const softmodem_params_t *softmodem_params = get_softmodem_params();
+  ue->custom_signal_cfg.enabled = softmodem_params->custom_re_enable;
+  if (ue->custom_signal_cfg.enabled) {
+    ue->custom_signal_cfg.target_frame = softmodem_params->custom_re_frame;
+    ue->custom_signal_cfg.target_slot = softmodem_params->custom_re_slot;
+    ue->custom_signal_cfg.symbol = softmodem_params->custom_re_symbol;
+    ue->custom_signal_cfg.start_sc = softmodem_params->custom_re_start_sc;
+    ue->custom_signal_cfg.num_re = softmodem_params->custom_re_num_re;
+    ue->custom_signal_cfg.ant = 0;
+  }
+
   phy_init_nr_top(ue);
   // many memory allocation sizes are hard coded
   AssertFatal( fp->nb_antennas_rx <= 4, "hard coded allocation for ue_common_vars->dl_ch_estimates[gNB_id]" );

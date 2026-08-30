@@ -1197,6 +1197,22 @@ void pdsch_processing(PHY_VARS_NR_UE *ue, const UE_nr_rxtx_proc_t *proc, nr_phy_
     }
   }
 
+  // Custom RE test signal: extract and dump the raw (pre-equalization) IQ values at the
+  // configured RE location, for offline comparison against the gNB's custom_tx_iq.m dump.
+  if (ue->custom_signal_cfg.enabled
+      && (ue->custom_signal_cfg.target_frame == 0 || frame_rx % ue->custom_signal_cfg.target_frame == 0)
+      && nr_slot_rx == ue->custom_signal_cfg.target_slot) {
+    int symb = ue->custom_signal_cfg.symbol;
+    if (!slot_fep_map[symb]) {
+      nr_slot_fep(ue, &ue->frame_parms, nr_slot_rx, symb, rxdataF, link_type_dl, 0, ue->common_vars.rxdata);
+      slot_fep_map[symb] = true;
+    }
+    c16_t extracted[ue->custom_signal_cfg.num_re];
+    nr_extract_custom_signal(rxdataF[ue->custom_signal_cfg.ant], &ue->frame_parms, &ue->custom_signal_cfg, extracted);
+    LOG_M("custom_rx_iq.m", "custom_rx", extracted, ue->custom_signal_cfg.num_re, 1, 1);
+    LOG_A(PHY, "CUSTOM_RE_RX_CAPTURED frame %d slot %d\n", frame_rx, nr_slot_rx);
+  }
+
   const int actor_idx_llr = proc->nr_slot_rx % ue->pdsch_num_actors;
   int16_t **llr = ue->pdsch_scratch[actor_idx_llr].llr;
   fapi_nr_dl_config_dlsch_pdu_rel15_t *dlsch_config = &phy_data->dlsch_config;

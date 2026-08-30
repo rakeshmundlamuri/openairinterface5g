@@ -298,6 +298,21 @@ void phy_procedures_gNB_TX(PHY_VARS_gNB *gNB,
     nr_generate_pdsch(gNB, num_pdsch, gNB->dlsch, frame, slot);
   }
 
+  // Custom RE test signal: written last so it can't be overwritten by any of the standard
+  // DL channels generated above for this slot.
+  if (gNB->custom_signal_cfg.enabled
+      && (gNB->custom_signal_cfg.target_frame == 0 || frame % gNB->custom_signal_cfg.target_frame == 0)
+      && slot == gNB->custom_signal_cfg.target_slot) {
+    nr_generate_custom_signal(gNB->common_vars.txdataF[gNB->custom_signal_cfg.ant], fp, &gNB->custom_signal_cfg);
+    LOG_M("custom_tx_iq.m",
+          "custom_tx",
+          gNB->custom_signal_cfg.iq,
+          gNB->custom_signal_cfg.num_re,
+          1,
+          1);
+    LOG_A(PHY, "CUSTOM_RE_TX_CAPTURED frame %d slot %d\n", frame, slot);
+  }
+
   //apply the OFDM symbol rotation here
   start_meas(&gNB->phase_comp_stats);
   for (int aa = 0; aa < fp->nb_antennas_tx; aa++) {
