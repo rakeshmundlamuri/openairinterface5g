@@ -49,19 +49,8 @@ void nr_generate_custom_signal(c16_t *txdataF, const NR_DL_FRAME_PARMS *frame_pa
     tx[cfg->start_sc + i] = cfg->iq[i];
 }
 
-void nr_extract_custom_signal(const c16_t *rxdataF, const NR_DL_FRAME_PARMS *frame_parms, const nr_custom_signal_config_t *cfg, c16_t *out)
+void nr_extract_custom_signal(const c16_t *rxdataF_comp_symbol, int j, const nr_custom_signal_config_t *cfg, c16_t *out)
 {
-  // txdataF/start_sc use the same "logical RE index from subcarrier 0" convention as the other DL
-  // channel generators (PSS/PBCH/PDCCH/PRS); on TX that gets fft_shift()'d into native FFT-bin order
-  // as part of OFDM modulation. rxdataF, however, is the UE's raw post-DFT output (never un-shifted),
-  // so reading back the same logical RE requires adding first_carrier_offset here, same as e.g.
-  // nr_dl_channel_estimation.c's bwp_start_subcarrier computation.
-  const c16_t *rx = rxdataF + cfg->symbol * frame_parms->ofdm_symbol_size;
-  int k = frame_parms->first_carrier_offset + cfg->start_sc;
-  for (int i = 0; i < cfg->num_re; i++) {
-    if (k >= frame_parms->ofdm_symbol_size)
-      k -= frame_parms->ofdm_symbol_size;
-    out[i] = rx[k];
-    k++;
-  }
+  for (int i = 0; i < cfg->num_re; i++)
+    out[i] = rxdataF_comp_symbol[j + i];
 }

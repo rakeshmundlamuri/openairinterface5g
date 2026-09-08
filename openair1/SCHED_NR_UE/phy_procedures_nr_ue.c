@@ -1197,22 +1197,6 @@ void pdsch_processing(PHY_VARS_NR_UE *ue, const UE_nr_rxtx_proc_t *proc, nr_phy_
     }
   }
 
-  // Custom RE test signal: extract and dump the raw (pre-equalization) IQ values at the
-  // configured RE location, for offline comparison against the gNB's custom_tx_iq.m dump.
-  if (ue->custom_signal_cfg.enabled
-      && (ue->custom_signal_cfg.target_frame == 0 || frame_rx % ue->custom_signal_cfg.target_frame == 0)
-      && nr_slot_rx == ue->custom_signal_cfg.target_slot) {
-    int symb = ue->custom_signal_cfg.symbol;
-    if (!slot_fep_map[symb]) {
-      nr_slot_fep(ue, &ue->frame_parms, nr_slot_rx, symb, rxdataF, link_type_dl, 0, ue->common_vars.rxdata);
-      slot_fep_map[symb] = true;
-    }
-    c16_t extracted[ue->custom_signal_cfg.num_re];
-    nr_extract_custom_signal(rxdataF[ue->custom_signal_cfg.ant], &ue->frame_parms, &ue->custom_signal_cfg, extracted);
-    LOG_M("custom_rx_iq.m", "custom_rx", extracted, ue->custom_signal_cfg.num_re, 1, 1);
-    LOG_A(PHY, "CUSTOM_RE_RX_CAPTURED frame %d slot %d\n", frame_rx, nr_slot_rx);
-  }
-
   const int actor_idx_llr = proc->nr_slot_rx % ue->pdsch_num_actors;
   int16_t **llr = ue->pdsch_scratch[actor_idx_llr].llr;
   fapi_nr_dl_config_dlsch_pdu_rel15_t *dlsch_config = &phy_data->dlsch_config;
@@ -1268,6 +1252,42 @@ void pdsch_processing(PHY_VARS_NR_UE *ue, const UE_nr_rxtx_proc_t *proc, nr_phy_
     NR_DL_UE_HARQ_t *harq = &ue->dl_harq_processes[c][dlsch_config->harq_process_nbr];
     // it returns -1 in case of internal failure, or 0 in case of normal result
     int ret_pdsch = nr_ue_pdsch_procedures(ue, proc, dlsch, harq, dlsch_config, llr[c], rxdataF, &freq_alloc);
+
+    // Custom RE test signal: extract and dump the post-equalization (channel-compensated)
+    // IQ values at the configured data RE location, for offline comparison against the
+    // gNB's custom_tx_iq.m dump. Only valid on a non-DMRS symbol of this PDSCH allocation
+    // (real DMRS elsewhere in the slot is what actually drove the channel estimate/compensation).
+    if (ue->custom_signal_cfg.enabled
+        && (ue->custom_signal_cfg.target_frame == 0 || frame_rx % ue->custom_signal_cfg.target_frame == 0)
+        && nr_slot_rx == ue->custom_signal_cfg.target_slot) {
+      int symbol = ue->custom_signal_cfg.symbol;
+      int alloc_start_sc = (dlsch_config->BWPStart + freq_alloc.first_rb) * NR_NB_SC_PER_RB;
+      int alloc_end_sc = alloc_start_sc + freq_alloc.num_rbs * NR_NB_SC_PER_RB;
+      bool ok = symbol >= dlsch_config->start_symbol && symbol < dlsch_config->start_symbol + dlsch_config->number_symbols
+                && !(dlsch_config->dlDmrsSymbPos & (1 << symbol)) && ue->custom_signal_cfg.start_sc >= alloc_start_sc
+                && ue->custom_signal_cfg.start_sc + ue->custom_signal_cfg.num_re <= alloc_end_sc;
+      if (ok) {
+        int j = ue->custom_signal_cfg.start_sc - alloc_start_sc;
+        pdsch_scratch_t *scratch = &ue->pdsch_scratch[actor_idx_llr];
+        const c16_t *comp_symbol = &scratch->rxdataF_comp[symbol * NR_MAX_NB_LAYERS * scratch->pdsch_buf_size_max];
+        c16_t extracted[ue->custom_signal_cfg.num_re];
+        nr_extract_custom_signal(comp_symbol, j, &ue->custom_signal_cfg, extracted);
+        LOG_M("custom_rx_iq.m", "custom_rx", extracted, ue->custom_signal_cfg.num_re, 1, 1);
+        LOG_A(PHY, "CUSTOM_RE_RX_CAPTURED frame %d slot %d\n", frame_rx, nr_slot_rx);
+      } else {
+        LOG_W(PHY,
+              "custom RE signal: symbol/subcarrier config doesn't fit this slot's PDSCH allocation "
+              "(symbol %d, sc %d..%d, alloc symbols %d..%d sc %d..%d) - skipping\n",
+              symbol,
+              ue->custom_signal_cfg.start_sc,
+              ue->custom_signal_cfg.start_sc + ue->custom_signal_cfg.num_re,
+              dlsch_config->start_symbol,
+              dlsch_config->start_symbol + dlsch_config->number_symbols,
+              alloc_start_sc,
+              alloc_end_sc);
+      }
+    }
+
     TracyCPlot("pdsch mcs", dlsch->cw_info.mcs);
 
     UEscopeCopy(ue, pdschLlr, llr[c], sizeof(int16_t), 1, G, 0);

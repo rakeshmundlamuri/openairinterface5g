@@ -298,19 +298,45 @@ void phy_procedures_gNB_TX(PHY_VARS_gNB *gNB,
     nr_generate_pdsch(gNB, num_pdsch, gNB->dlsch, frame, slot);
   }
 
-  // Custom RE test signal: written last so it can't be overwritten by any of the standard
-  // DL channels generated above for this slot.
+  // Custom RE test signal: overwrites data REs of the real PDSCH allocation, on a symbol
+  // that carries no DMRS (so DMRS elsewhere in the slot still drives real UE channel
+  // estimation). Written last so it can't be overwritten by nr_generate_pdsch() above.
   if (gNB->custom_signal_cfg.enabled
       && (gNB->custom_signal_cfg.target_frame == 0 || frame % gNB->custom_signal_cfg.target_frame == 0)
       && slot == gNB->custom_signal_cfg.target_slot) {
-    nr_generate_custom_signal(gNB->common_vars.txdataF[gNB->custom_signal_cfg.ant], fp, &gNB->custom_signal_cfg);
-    LOG_M("custom_tx_iq.m",
-          "custom_tx",
-          gNB->custom_signal_cfg.iq,
-          gNB->custom_signal_cfg.num_re,
-          1,
-          1);
-    LOG_A(PHY, "CUSTOM_RE_TX_CAPTURED frame %d slot %d\n", frame, slot);
+    if (num_pdsch > 0) {
+      const nfapi_nr_dl_tti_pdsch_pdu_rel15_t *pdu = &gNB->dlsch[0].pdsch_pdu->pdsch_pdu_rel15;
+      int symbol = gNB->custom_signal_cfg.symbol;
+      int alloc_start_sc = (pdu->BWPStart + pdu->rbStart) * NR_NB_SC_PER_RB;
+      int alloc_end_sc = alloc_start_sc + pdu->rbSize * NR_NB_SC_PER_RB;
+      bool ok = pdu->nrOfLayers == 1 && symbol >= pdu->StartSymbolIndex && symbol < pdu->StartSymbolIndex + pdu->NrOfSymbols
+                && !(pdu->dlDmrsSymbPos & (1 << symbol)) && gNB->custom_signal_cfg.start_sc >= alloc_start_sc
+                && gNB->custom_signal_cfg.start_sc + gNB->custom_signal_cfg.num_re <= alloc_end_sc;
+      if (ok) {
+        nr_generate_custom_signal(gNB->common_vars.txdataF[gNB->custom_signal_cfg.ant], fp, &gNB->custom_signal_cfg);
+        LOG_M("custom_tx_iq.m",
+              "custom_tx",
+              gNB->custom_signal_cfg.iq,
+              gNB->custom_signal_cfg.num_re,
+              1,
+              1);
+        LOG_A(PHY, "CUSTOM_RE_TX_CAPTURED frame %d slot %d\n", frame, slot);
+      } else {
+        LOG_W(PHY,
+              "custom RE signal: symbol/subcarrier config doesn't fit this slot's PDSCH allocation "
+              "(symbol %d, sc %d..%d, alloc symbols %d..%d sc %d..%d, layers %d) - skipping\n",
+              symbol,
+              gNB->custom_signal_cfg.start_sc,
+              gNB->custom_signal_cfg.start_sc + gNB->custom_signal_cfg.num_re,
+              pdu->StartSymbolIndex,
+              pdu->StartSymbolIndex + pdu->NrOfSymbols,
+              alloc_start_sc,
+              alloc_end_sc,
+              pdu->nrOfLayers);
+      }
+    } else {
+      LOG_W(PHY, "custom RE signal: no PDSCH scheduled in frame %d slot %d - nothing to overwrite\n", frame, slot);
+    }
   }
 
   //apply the OFDM symbol rotation here
