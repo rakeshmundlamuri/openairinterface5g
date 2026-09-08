@@ -130,6 +130,35 @@ been through real channel estimation/equalization, which renormalizes amplitude
 relative to the channel estimate. `compare_iq.py` (below) fits out that scale before
 comparing, so this is expected, not a bug.
 
+## Sending an arbitrary signal without hand-picking a placement
+
+`scripts/custom_re/send_recv_signal.py` is a general-purpose "send this signal, get back
+what was received" tool: give it a signal (a list of complex values, or an IQ file) and
+it automatically finds a `(slot, symbol, start_sc)` placement that actually fits the live
+PDSCH allocation — no need to hand-pick values like the rest of this doc does. It works
+by making a cheap gNB-only "discovery" launch with a starting guess (slot 1, symbol 13,
+`start_sc` 0 — the same defaults proven elsewhere in this doc), and when that guess is
+rejected, parsing the actual allocation bounds straight out of the `LOG_W` message this
+feature already produces (see above) to narrow in on a placement that works, before doing
+the real gNB+UE send/receive (with the same fading-channel retry as `scripts/jscc/run_demo.py`).
+Only fits within a single OFDM symbol — a signal too long for any candidate slot's
+allocation raises a clear error rather than silently splitting or hanging.
+
+As a library:
+```python
+from send_recv_signal import send_recv
+received = send_recv(iq_values, nr_softmodem, nr_uesoftmodem, gnb_conf, channel_type="AWGN")
+```
+Or standalone:
+```bash
+python3 scripts/custom_re/send_recv_signal.py \
+  --nr-softmodem ./nr-softmodem --nr-uesoftmodem ./nr-uesoftmodem --gnb-conf <conf> \
+  --length 20   # or --iqfile <path>
+```
+`received` is raw (post-equalization, uncalibrated) — descale it against a known
+reference the same way `scripts/jscc/decode_image.py` does with its pilot prefix, since a
+real receiver has no other way to know the channel's scale/rotation.
+
 ## Testing it yourself
 
 ### 1. Build

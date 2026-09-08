@@ -175,11 +175,13 @@ speaking, on a GPU) should improve it further.
   got as far as syncing - a transient OAI thread-startup race, not reproducible, and
   unrelated to this feature (a plain retry succeeded immediately). If `run_demo.py`
   reports the UE never captured, check its log for this before assuming a real issue.
-- **`--phy-test` mode's default PDSCH slot/symbol** (slot 1, symbol 13) is hard-coded
-  in `run_demo.py`, matching what's already proven in
-  `scripts/custom_re/run_rfsim_test.sh` for the reference 106-PRB conf — a different
-  gNB config's scheduler may place PDSCH differently; the existing runtime validation
-  (`LOG_W ... doesn't fit this slot's PDSCH allocation`) will say so if it doesn't fit.
+- **RF transport is not `run_demo.py`'s job** — it delegates entirely to
+  `scripts/custom_re/send_recv_signal.py`, which auto-discovers a `(slot, symbol,
+  start_sc)` placement that fits the live PDSCH allocation (by reading the same
+  `LOG_W ... doesn't fit this slot's PDSCH allocation` validation this feature already
+  produces) rather than assuming the slot 1 / symbol 13 default that was hard-coded here
+  in an earlier version. See [`scripts/README.md`](../scripts/README.md) for why these
+  are two separate scripts.
 
 ## Cloud deployment
 
