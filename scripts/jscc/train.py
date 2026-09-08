@@ -30,6 +30,9 @@ def main():
     ap.add_argument("--snr-db", type=float, default=10.0)
     ap.add_argument("--inner-channels", type=int, default=8, help="c: gives ratio=c*64/3072")
     ap.add_argument("--out", default=None, help="checkpoint output path")
+    ap.add_argument("--init-checkpoint", default=None, help="load these weights as the starting point "
+                     "instead of training from scratch (e.g. continue training an existing checkpoint "
+                     "with more epochs)")
     ap.add_argument("--seed", type=int, default=42, help="for reproducible runs; also avoids two runs "
                      "with identical hyperparameters (-> identical default --out path) silently "
                      "diverging from different random initializations")
@@ -50,8 +53,20 @@ def main():
     opt = optim.Adam(model.parameters(), lr=args.lr)
     criterion = torch.nn.MSELoss()
 
+    epochs_done = 0
+    if args.init_checkpoint:
+        ckpt = torch.load(args.init_checkpoint, map_location=device)
+        if ckpt.get("c") != args.inner_channels or ckpt.get("channel") != args.channel:
+            print(f"WARNING: --init-checkpoint was trained with c={ckpt.get('c')} channel={ckpt.get('channel')}, "
+                  f"but this run uses c={args.inner_channels} channel={args.channel} - loading anyway, "
+                  f"but shapes may not match", file=__import__("sys").stderr)
+        model.load_state_dict(ckpt["state_dict"])
+        epochs_done = ckpt.get("epochs_done", 0)
+        print(f"loaded initial weights from {args.init_checkpoint} ({epochs_done} epoch(s) already trained)")
+
     print(f"training DeepJSCC c={args.inner_channels} channel={args.channel} snr_db={args.snr_db} "
-          f"for {args.epochs} epochs on {len(train_set)} images, batch_size={args.batch_size}, device={device}")
+          f"for {args.epochs} more epochs (epoch {epochs_done+1}..{epochs_done+args.epochs} overall) "
+          f"on {len(train_set)} images, batch_size={args.batch_size}, device={device}")
 
     for epoch in range(args.epochs):
         t0 = time.time()
@@ -68,11 +83,13 @@ def main():
             n += imgs.size(0)
         mse = total_loss / n
         psnr = 10 * torch.log10(torch.tensor(1.0 / mse)) if mse > 0 else float("inf")
-        print(f"epoch {epoch+1}/{args.epochs}: mse={mse:.5f} psnr={psnr:.2f}dB elapsed={time.time()-t0:.1f}s")
+        total_epochs = epochs_done + epoch + 1
+        print(f"epoch {epoch+1}/{args.epochs} (overall {total_epochs}): mse={mse:.5f} psnr={psnr:.2f}dB "
+              f"elapsed={time.time()-t0:.1f}s")
         torch.save({"state_dict": model.state_dict(), "c": args.inner_channels,
-                    "channel": args.channel, "snr_db": args.snr_db}, out_path)
+                    "channel": args.channel, "snr_db": args.snr_db, "epochs_done": total_epochs}, out_path)
 
-    print(f"saved checkpoint to {out_path}")
+    print(f"saved checkpoint to {out_path} ({epochs_done + args.epochs} epochs total)")
 
 
 if __name__ == "__main__":

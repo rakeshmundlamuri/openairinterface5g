@@ -1,5 +1,9 @@
 .venv/
 data/
-checkpoints/
+# checkpoints/ is mostly excluded (experimental runs), except the default checkpoint
+# encode_image.py/decode_image.py/run_demo.py fall back to when --checkpoint is omitted -
+# committed so testing works without training first.
+checkpoints/*
+!checkpoints/cifar10_c8_awgn10.pth
 __pycache__/
 *.pyc

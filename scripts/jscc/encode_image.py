@@ -26,6 +26,7 @@ from model import Encoder
 from pilot import pilot_symbols
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+DEFAULT_CHECKPOINT = SCRIPT_DIR / "checkpoints" / "cifar10_c8_awgn10.pth"
 
 
 def load_image(image_path, cifar_index):
@@ -40,12 +41,16 @@ def load_image(image_path, cifar_index):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--checkpoint", required=True)
+    ap.add_argument("--checkpoint", default=str(DEFAULT_CHECKPOINT) if DEFAULT_CHECKPOINT.exists() else None,
+                     help=f"default: {DEFAULT_CHECKPOINT} if it exists (train one with train.py otherwise)")
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--image", default=None, help="path to an image file (resized to 32x32)")
     ap.add_argument("--cifar-index", type=int, default=0, help="CIFAR-10 test-set index if --image not given")
     ap.add_argument("--num-pilot", type=int, default=8)
     args = ap.parse_args()
+    if args.checkpoint is None:
+        ap.error(f"no --checkpoint given and no default checkpoint found at {DEFAULT_CHECKPOINT} - "
+                 f"train one first with train.py, or pass --checkpoint explicitly")
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

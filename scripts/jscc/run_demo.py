@@ -22,6 +22,7 @@ import tempfile
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+DEFAULT_CHECKPOINT = SCRIPT_DIR / "checkpoints" / "cifar10_c8_awgn10.pth"
 sys.path.insert(0, str(SCRIPT_DIR.parent / "custom_re"))
 from send_recv_signal import send_recv  # noqa: E402
 
@@ -36,7 +37,8 @@ def main():
     ap.add_argument("--nr-softmodem", required=True)
     ap.add_argument("--nr-uesoftmodem", required=True)
     ap.add_argument("--gnb-conf", required=True)
-    ap.add_argument("--checkpoint", required=True)
+    ap.add_argument("--checkpoint", default=str(DEFAULT_CHECKPOINT) if DEFAULT_CHECKPOINT.exists() else None,
+                     help=f"default: {DEFAULT_CHECKPOINT} if it exists (train one with train.py otherwise)")
     ap.add_argument("--image", default=None)
     ap.add_argument("--cifar-index", type=int, default=0)
     ap.add_argument("--num-pilot", type=int, default=8)
@@ -45,6 +47,9 @@ def main():
     ap.add_argument("--max-retries", type=int, default=4, help="retries on RF sync failure - "
                      "see send_recv_signal.py")
     args = ap.parse_args()
+    if args.checkpoint is None:
+        ap.error(f"no --checkpoint given and no default checkpoint found at {DEFAULT_CHECKPOINT} - "
+                 f"train one first with train.py, or pass --checkpoint explicitly")
 
     out_dir = Path(args.out_dir) if args.out_dir else Path(tempfile.mkdtemp(prefix="jscc_out_"))
     out_dir.mkdir(parents=True, exist_ok=True)
