@@ -33,7 +33,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from fetch_bundle import fetch_qam_bundle
-from run_demo import evaluate_image, load_scheme_resources
+from run_demo import evaluate_image_batch, load_scheme_resources
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "custom_re"))
@@ -49,12 +49,13 @@ def parse_list(s, cast):
     return [cast(x) for x in s.split(",") if x.strip() != ""]
 
 
-def discover_shared_placement(nr_softmodem, gnb_conf, num_pilot, sample_iq_len, work_dir):
-    """All (scheme, image, noise level) combinations send the same number of REs
-    (num_pilot + payload length) - discover the placement once and reuse it for the
-    whole sweep instead of re-discovering it on every single send_recv call. Content
-    doesn't matter for discovery, only the count, so a throwaway QPSK pattern is fine."""
-    num_re = num_pilot + sample_iq_len
+def discover_shared_placement(nr_softmodem, gnb_conf, num_re, work_dir):
+    """All (scheme, noise level, batch) combinations send the same number of REs per
+    launch (batch_size * (num_pilot + payload length), the largest batch used) -
+    discover the placement once, sized for the largest batch, and reuse it for the
+    whole sweep (smaller trailing batches, using fewer REs at the same start_sc, are
+    still valid within an already-validated larger range). Content doesn't matter for
+    discovery, only the count, so a throwaway QPSK pattern is fine."""
     print(f"discovering a shared placement for {num_re} REs (reused across the whole sweep)...")
     probe_dir = work_dir / "placement_probe"
     probe_dir.mkdir(parents=True, exist_ok=True)
@@ -69,27 +70,32 @@ def discover_shared_placement(nr_softmodem, gnb_conf, num_pilot, sample_iq_len, 
 
 
 def run_sweep(qam_dir, classifier_path, image_indices, noise_db_values, num_pilot,
-              nr_softmodem, nr_uesoftmodem, gnb_conf, channel_type, max_retries, out_dir):
-    resources = {scheme: load_scheme_resources(scheme, qam_dir, classifier_path) for scheme in SCHEMES}
+              nr_softmodem, nr_uesoftmodem, gnb_conf, channel_type, max_retries, out_dir,
+              extra_images=0, mnist_root=None, batch_size=8):
+    resources = {scheme: load_scheme_resources(scheme, qam_dir, classifier_path,
+                                                extra_images=extra_images, mnist_root=mnist_root)
+                 for scheme in SCHEMES}
     cfg = resources["semantic"]["cfg"]
     k = int(resources["semantic"]["data"]["k"])
 
     sample_len = len(resources["semantic"]["data"]["semantic_qam_symbols_iq"][image_indices[0]])
-    placement = discover_shared_placement(nr_softmodem, gnb_conf, num_pilot, sample_len, out_dir)
+    chunks = [image_indices[i:i + batch_size] for i in range(0, len(image_indices), batch_size)]
+    max_batch_re = max(len(c) for c in chunks) * (num_pilot + sample_len)
+    placement = discover_shared_placement(nr_softmodem, gnb_conf, max_batch_re, out_dir)
 
     all_results = []
-    total = len(noise_db_values) * len(SCHEMES) * len(image_indices)
+    total_launches = len(noise_db_values) * len(SCHEMES) * len(chunks)
     done = 0
     for noise_db in noise_db_values:
         for scheme in SCHEMES:
             per_image = []
-            for image_index in image_indices:
+            for chunk in chunks:
                 done += 1
-                print(f"\n[{done}/{total}] noise_power_dB={noise_db} scheme={scheme} image={image_index}")
-                r = evaluate_image(resources[scheme], image_index, num_pilot, nr_softmodem, nr_uesoftmodem,
-                                    gnb_conf, channel_type, max_retries, out_dir / "runs",
-                                    noise_power_db=noise_db, placement=placement)
-                per_image.append(r)
+                print(f"\n[launch {done}/{total_launches}] noise_power_dB={noise_db} scheme={scheme} "
+                      f"images={list(chunk)} ({len(chunk)} in one real rfsim send)")
+                per_image.extend(evaluate_image_batch(
+                    resources[scheme], chunk, num_pilot, nr_softmodem, nr_uesoftmodem, gnb_conf,
+                    channel_type, max_retries, out_dir / "runs", noise_power_db=noise_db, placement=placement))
 
             agg = {
                 "noise_power_db": noise_db,
@@ -202,17 +208,28 @@ def main():
     ap.add_argument("--gnb-conf", required=True)
     ap.add_argument("--qam-order", type=int, default=64, choices=[4, 16, 64, 256, 1024])
     ap.add_argument("--image-indices", default="0,1,2",
-                     help="comma-separated 0-9 indices, or 'all' for the full 10-image set (default: 0,1,2)")
+                     help="comma-separated indices, or 'all' for the full 10-image set plus any "
+                          "--extra-images (default: 0,1,2)")
+    ap.add_argument("--extra-images", type=int, default=0,
+                     help="generate this many additional MNIST images beyond OAI_Demo's fixed 10 "
+                          "(indices 10, 11, ... - see extra_images.py). Default 0.")
+    ap.add_argument("--mnist-root", default=None, help="cache dir for the MNIST download (default: data/mnist_raw)")
     ap.add_argument("--noise-db-values", default="-10,-5,0,5,10,15,20",
                      help="rfsim channelmod noise_power_dB values to sweep (comma-separated)")
     ap.add_argument("--channel-type", default="AWGN", help="rfsim channel model type (default: AWGN)")
     ap.add_argument("--num-pilot", type=int, default=8)
+    ap.add_argument("--batch-size", type=int, default=8,
+                     help="images per real rfsim launch (batched into one send/receive - see "
+                          "send_batch_over_rfsim in run_demo.py). Default 8, the most this PDSCH "
+                          "config's single-symbol allocation (600 REs) fits at num_pilot=8/k=64 "
+                          "(8*(8+64)=576). Lower it if a different --gnb-conf has less room.")
     ap.add_argument("--max-retries", type=int, default=4)
     ap.add_argument("--cache-dir", default=str(DEFAULT_CACHE_DIR))
     ap.add_argument("--out-dir", default=None)
     args = ap.parse_args()
 
-    image_indices = list(range(10)) if args.image_indices == "all" else parse_list(args.image_indices, int)
+    image_indices = (list(range(10 + args.extra_images)) if args.image_indices == "all"
+                     else parse_list(args.image_indices, int))
     noise_db_values = parse_list(args.noise_db_values, float)
 
     out_dir = Path(args.out_dir) if args.out_dir else SCRIPT_DIR / "_out" / f"{args.qam_order}QAM_snr_sweep"
@@ -222,7 +239,8 @@ def main():
 
     all_results, cfg = run_sweep(qam_dir, classifier_path, image_indices, noise_db_values, args.num_pilot,
                                   args.nr_softmodem, args.nr_uesoftmodem, args.gnb_conf, args.channel_type,
-                                  args.max_retries, out_dir)
+                                  args.max_retries, out_dir, extra_images=args.extra_images,
+                                  mnist_root=args.mnist_root, batch_size=args.batch_size)
 
     print_summary_table(all_results, cfg)
     plot_sweep(all_results, cfg, out_dir / "snr_sweep.png")

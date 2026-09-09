@@ -127,6 +127,31 @@ def reconstruct_from_received(vqvae, received_indices, selected_slots):
     return vqvae.decode(latent)
 
 
+def encode_image_to_symbols(vqvae, constellation_points, image_784):
+    """Encode a NEW image (not one of OAI_Demo's own 10 exported ones) into QAM symbols,
+    using the same vqvae/constellation bundle already loaded for decode. Every bundle
+    observed so far has num_embeddings == qam_order and k == num_concepts (all 64
+    concepts always transmitted, nothing dropped by the importance-based top-k) - so
+    each concept's codebook index directly IS its symbol index (see fetch_bundle.py's
+    docstring), and there is nothing to actually *select*: this uses the concepts'
+    natural order (selected_slots = arange(num_concepts)) rather than replicating
+    OAI_Demo's own importance-based reordering, which the round trip is invariant to
+    as long as encode and decode agree on the same order (they do, both here).
+
+    image_784: array-like, shape (784,), float in [0,1] (flattened 28x28, matching
+    OAI_Demo's own MNIST preprocessing).
+    Returns (symbols_iq, symbol_indices, selected_slots) in the same shapes/dtypes as
+    the bundle's own npz arrays, so this can substitute for the bundle's fixed 10
+    images anywhere they're read from."""
+    img = torch.as_tensor(image_784, dtype=torch.float32).reshape(1, -1)
+    with torch.no_grad():
+        _, _, indices, _ = vqvae.encode(img)
+    symbol_indices = indices[0].numpy()
+    symbols_iq = constellation_points[torch.as_tensor(symbol_indices, dtype=torch.long)].numpy()
+    selected_slots = np.arange(vqvae.num_concepts)
+    return symbols_iq, symbol_indices, selected_slots
+
+
 def bit_error_rate(detected_symbols, true_symbol_indices, bits_per_symbol):
     """Fraction of mismatched bits between two arrays of symbol indices (same shape),
     each unpacked to bits_per_symbol bits - the BER counterpart to a raw symbol

@@ -66,12 +66,52 @@ def send_scheme_over_rfsim(iq_ground_truth, num_pilot, nr_softmodem, nr_uesoftmo
     return calibrated
 
 
-def load_scheme_resources(scheme, qam_dir, classifier_path):
+def send_batch_over_rfsim(iq_ground_truth_list, num_pilot, nr_softmodem, nr_uesoftmodem, gnb_conf,
+                           channel_type, max_retries, work_dir, noise_power_db=-10, placement=None):
+    """Same idea as send_scheme_over_rfsim, but for several images in ONE real
+    send_recv() call: concatenates each image's own pilot+peak-normalized-payload chunk
+    into a single longer signal, sends it once, then calibrates/descales each chunk
+    independently using its own embedded pilot. The dominant cost of a real rfsim test
+    is the gNB/UE launch+PHY-sync+teardown overhead, not the RE count (see
+    doc/CUSTOM_SIGNAL_AI.md) - batching N images here turns N launches into 1.
+    Returns a list of calibrated complex-value lists, same order/length as the input."""
+    pilots = pilot_symbols(num_pilot)
+    chunk_len = num_pilot + len(iq_ground_truth_list[0])
+    peak_scales = []
+    tx = []
+    for iq_ground_truth in iq_ground_truth_list:
+        if len(iq_ground_truth) != chunk_len - num_pilot:
+            raise ValueError("all images in a batch must have the same payload length")
+        peak_scale = max(abs(v) for v in iq_ground_truth) or 1.0
+        peak_scales.append(peak_scale)
+        tx.extend(pilots + [v / peak_scale for v in iq_ground_truth])
+
+    received = send_recv(tx, nr_softmodem, nr_uesoftmodem, gnb_conf, channel_type=channel_type,
+                          max_retries=max_retries, work_dir=work_dir, noise_power_db=noise_power_db,
+                          placement=placement)
+
+    results = []
+    for i, peak_scale in enumerate(peak_scales):
+        start = i * chunk_len
+        rx_pilot = received[start:start + num_pilot]
+        rx_payload = received[start + num_pilot:start + chunk_len]
+        scale = fit_pilot_scale(rx_pilot, pilots)
+        if scale == 0:
+            raise RuntimeError(f"pilot calibration failed for batch item {i} (zero scale)")
+        results.append([(r / scale) * peak_scale for r in rx_payload])
+    return results
+
+
+def load_scheme_resources(scheme, qam_dir, classifier_path, extra_images=0, mnist_root=None):
     """Load everything needed to evaluate `scheme` (semantic/standard) once - reuse the
     returned dict across many evaluate_image() calls (many images / noise levels /
-    schemes) instead of re-reading config/npz/state-dicts from disk every time."""
+    schemes) instead of re-reading config/npz/state-dicts from disk every time.
+
+    extra_images: if >0, generate this many additional MNIST images (beyond OAI_Demo's
+    fixed 10) via extra_images.py and append them as image indices 10, 11, ... - same
+    vqvae, encoded fresh (see model.py's encode_image_to_symbols)."""
     cfg = json.loads((qam_dir / "config.json").read_text())
-    data = np.load(qam_dir / "semantic_qam_dataset.npz")
+    npz = np.load(qam_dir / "semantic_qam_dataset.npz")
 
     vqvae = ImportanceVQVAE(cfg["latent_dim"], cfg["num_embeddings"], cfg["num_concepts"])
     vqvae.load_state_dict(torch.load(qam_dir / "models" / "vqvae_state.pt", map_location="cpu", weights_only=True))
@@ -90,40 +130,32 @@ def load_scheme_resources(scheme, qam_dir, classifier_path):
         classifier.load_state_dict(torch.load(classifier_path, map_location="cpu", weights_only=True))
         classifier.eval()
 
+    data = {k: npz[k] for k in npz.files}
+    if extra_images > 0:
+        from extra_images import DEFAULT_MNIST_ROOT, build_extra_rows
+        extra = build_extra_rows(extra_images, vqvae, {scheme: points},
+                                  mnist_root=Path(mnist_root) if mnist_root else DEFAULT_MNIST_ROOT)
+        stackable = ("images", "labels", "selected_slots", "symbol_indices", "detected_symbol_indices",
+                     "decoded_images", f"{scheme}_qam_symbols_iq")
+        for key in stackable:
+            data[key] = np.concatenate([data[key], extra[key]], axis=0)
+
     return {"scheme": scheme, "cfg": cfg, "data": data, "vqvae": vqvae, "points": points, "classifier": classifier}
 
 
-def evaluate_image(resources, image_index, num_pilot, nr_softmodem, nr_uesoftmodem, gnb_conf,
-                    channel_type, max_retries, work_dir, noise_power_db=-10, placement=None):
-    """Send one image's already-exported QAM symbols for `resources['scheme']` over real
-    rfsim and return a flat dict of metrics (no printing, no image saving - callers that
-    want those, e.g. run_one_scheme, do it themselves with the returned tensors)."""
-    scheme, cfg, data = resources["scheme"], resources["cfg"], resources["data"]
-    vqvae, points, classifier = resources["vqvae"], resources["points"], resources["classifier"]
-
-    ground_truth_iq = data[f"{scheme}_qam_symbols_iq"][image_index]
-    k = int(data["k"])
-    bits_per_concept = int(data["bits_per_concept"])
-    bits_per_symbol = int(data["bits_per_symbol"])
-    payload_bit_length = k * bits_per_concept
-    selected_slots = data["selected_slots"][image_index:image_index + 1]
+def _build_result(scheme, data, vqvae, classifier, image_index, recon_row, detected_row, k):
+    """Shared metric computation for one image's demod/decode output - used by both the
+    single-image and batched code paths so they can't silently drift apart."""
     true_symbol_indices = data["symbol_indices"][image_index]
     label = int(data["labels"][image_index])
+    bits_per_symbol = int(data["bits_per_symbol"])
 
-    received_iq = send_scheme_over_rfsim(list(ground_truth_iq), num_pilot, nr_softmodem, nr_uesoftmodem,
-                                          gnb_conf, channel_type, max_retries, work_dir,
-                                          noise_power_db=noise_power_db, placement=placement)
-
-    recon, recovered_indices, detected_symbols = demap_and_reconstruct(
-        np.array(received_iq, dtype=np.complex64), points, selected_slots, k,
-        bits_per_concept, bits_per_symbol, payload_bit_length, vqvae)
-
-    symbol_error_rate = float(np.mean(detected_symbols[0] != true_symbol_indices))
-    ber = bit_error_rate(detected_symbols[0], true_symbol_indices, bits_per_symbol)
+    symbol_error_rate = float(np.mean(detected_row != true_symbol_indices))
+    ber = bit_error_rate(detected_row, true_symbol_indices, bits_per_symbol)
     sionna_ser = float(np.mean(data["detected_symbol_indices"][image_index] != true_symbol_indices))
 
     original = torch.as_tensor(data["images"][image_index]).reshape(1, 28, 28)
-    recon_t = torch.as_tensor(recon[0]).reshape(1, 28, 28)
+    recon_t = torch.as_tensor(recon_row).reshape(1, 28, 28)
     mse = float(torch.mean((recon_t - original) ** 2))
     psnr = 10 * torch.log10(torch.tensor(1.0 / mse)).item() if mse > 0 else float("inf")
     sionna_decoded = torch.as_tensor(data["decoded_images"][image_index]).reshape(1, 28, 28)
@@ -143,6 +175,61 @@ def evaluate_image(resources, image_index, num_pilot, nr_softmodem, nr_uesoftmod
             original.reshape(1, 784), recon_t.reshape(1, 784), classifier, torch.tensor([label]))
         result.update(quality)
     return result
+
+
+def evaluate_image(resources, image_index, num_pilot, nr_softmodem, nr_uesoftmodem, gnb_conf,
+                    channel_type, max_retries, work_dir, noise_power_db=-10, placement=None):
+    """Send one image's already-exported QAM symbols for `resources['scheme']` over real
+    rfsim and return a flat dict of metrics (no printing, no image saving - callers that
+    want those, e.g. run_one_scheme, do it themselves with the returned tensors)."""
+    scheme, data = resources["scheme"], resources["data"]
+    vqvae, points, classifier = resources["vqvae"], resources["points"], resources["classifier"]
+
+    ground_truth_iq = data[f"{scheme}_qam_symbols_iq"][image_index]
+    k = int(data["k"])
+    bits_per_concept = int(data["bits_per_concept"])
+    bits_per_symbol = int(data["bits_per_symbol"])
+    payload_bit_length = k * bits_per_concept
+    selected_slots = data["selected_slots"][image_index:image_index + 1]
+
+    received_iq = send_scheme_over_rfsim(list(ground_truth_iq), num_pilot, nr_softmodem, nr_uesoftmodem,
+                                          gnb_conf, channel_type, max_retries, work_dir,
+                                          noise_power_db=noise_power_db, placement=placement)
+
+    recon, recovered_indices, detected_symbols = demap_and_reconstruct(
+        np.array(received_iq, dtype=np.complex64), points, selected_slots, k,
+        bits_per_concept, bits_per_symbol, payload_bit_length, vqvae)
+
+    return _build_result(scheme, data, vqvae, classifier, image_index, recon[0], detected_symbols[0], k)
+
+
+def evaluate_image_batch(resources, image_indices, num_pilot, nr_softmodem, nr_uesoftmodem, gnb_conf,
+                          channel_type, max_retries, work_dir, noise_power_db=-10, placement=None):
+    """Same as evaluate_image, but for several images in ONE real rfsim launch (see
+    send_batch_over_rfsim) - returns a list of result dicts, same order as image_indices.
+    All images must share the same payload length (true for every bundle seen so far:
+    k=num_concepts=64 always, see fetch_bundle.py)."""
+    scheme, data = resources["scheme"], resources["data"]
+    vqvae, points, classifier = resources["vqvae"], resources["points"], resources["classifier"]
+
+    k = int(data["k"])
+    bits_per_concept = int(data["bits_per_concept"])
+    bits_per_symbol = int(data["bits_per_symbol"])
+    payload_bit_length = k * bits_per_concept
+
+    ground_truth_list = [list(data[f"{scheme}_qam_symbols_iq"][i]) for i in image_indices]
+    calibrated_list = send_batch_over_rfsim(ground_truth_list, num_pilot, nr_softmodem, nr_uesoftmodem,
+                                             gnb_conf, channel_type, max_retries, work_dir,
+                                             noise_power_db=noise_power_db, placement=placement)
+
+    received_stack = np.array(calibrated_list, dtype=np.complex64)
+    selected_slots_stack = data["selected_slots"][list(image_indices)]
+    recon, recovered_indices, detected_symbols = demap_and_reconstruct(
+        received_stack, points, selected_slots_stack, k, bits_per_concept, bits_per_symbol,
+        payload_bit_length, vqvae)
+
+    return [_build_result(scheme, data, vqvae, classifier, image_index, recon[row], detected_symbols[row], k)
+            for row, image_index in enumerate(image_indices)]
 
 
 def run_one_scheme(scheme, qam_dir, classifier_path, image_index, num_pilot,
