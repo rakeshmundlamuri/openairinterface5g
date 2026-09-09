@@ -45,15 +45,15 @@ _NO_PDSCH_RE = re.compile(r"no PDSCH scheduled in frame (\d+) slot (\d+)")
 _M_LINE_RE = re.compile(r"(-?\d+)\s*\+\s*j\*\((-?\d+)\)")
 
 
-def write_channelmod_conf(path, channel_type):
+def write_channelmod_conf(path, channel_type, noise_power_db=-10):
     path.write_text(f"""channelmod = {{
   max_chan = 10;
   modellist = "modellist_rfsimu_1";
   modellist_rfsimu_1 = (
     {{ model_name = "rfsimu_channel_enB0"; type = "{channel_type}"; ploss_dB = 0;
-      noise_power_dB = -10; forgetfact = 0; offset = 0; ds_tdl = 0; }},
+      noise_power_dB = {noise_power_db}; forgetfact = 0; offset = 0; ds_tdl = 0; }},
     {{ model_name = "rfsimu_channel_ue0"; type = "{channel_type}"; ploss_dB = 0;
-      noise_power_dB = -10; forgetfact = 0; offset = 0; ds_tdl = 0; }}
+      noise_power_dB = {noise_power_db}; forgetfact = 0; offset = 0; ds_tdl = 0; }}
   );
 }};
 """)
@@ -181,11 +181,19 @@ def parse_m_file_stable(path, expected_len, tries=20, delay=0.05):
 
 
 def send_recv(iq_values, nr_softmodem, nr_uesoftmodem, gnb_conf, channel_type=None, max_retries=4,
-              work_dir=None):
+              work_dir=None, noise_power_db=-10, placement=None):
     """Send iq_values (list of complex, magnitude expected in [-1,1]) over the real
     gNB->rfsim->UE PDSCH pipeline. Returns the raw received complex values (same length,
     post-equalization, NOT descaled/calibrated - do that with your own pilot/reference,
-    same as scripts/jscc/decode_image.py does)."""
+    same as scripts/jscc/decode_image.py does).
+
+    noise_power_db only takes effect when channel_type is set (it's the rfsim channel
+    model's noise_power_dB knob - not a calibrated Eb/No, see doc/CUSTOM_SIGNAL_AI.md).
+
+    placement, if given, is a (slot, symbol, start_sc) tuple to use as-is instead of
+    running discovery - useful when calling send_recv many times with the same num_re
+    (e.g. a parameter sweep), where re-discovering the same placement every call would
+    be wasted gNB-only launches. Get one once via find_placement() and reuse it."""
     nr_softmodem = Path(nr_softmodem).resolve()
     nr_uesoftmodem = Path(nr_uesoftmodem).resolve()
     gnb_conf = Path(gnb_conf).resolve()
@@ -206,7 +214,7 @@ def send_recv(iq_values, nr_softmodem, nr_uesoftmodem, gnb_conf, channel_type=No
         probe_conf_dir.mkdir(exist_ok=True)
         for f in gnb_conf.parent.glob("*.conf"):
             shutil.copy(f, probe_conf_dir / f.name)
-        write_channelmod_conf(probe_conf_dir / "channelmod_rfsimu.conf", channel_type)
+        write_channelmod_conf(probe_conf_dir / "channelmod_rfsimu.conf", channel_type, noise_power_db)
         gnb_conf_chanmod = probe_conf_dir / gnb_conf.name
         with open(gnb_conf_chanmod, "a") as f:
             f.write('\n@include "channelmod_rfsimu.conf"\n')
@@ -216,8 +224,11 @@ def send_recv(iq_values, nr_softmodem, nr_uesoftmodem, gnb_conf, channel_type=No
         ue_conf_args = ["-O", str(ue_conf)]
         channel_flag = ["--rfsimulator.[0].options", "chanmod"]
 
-    print(f"discovering a placement for {num_re} REs...")
-    slot, symbol, start_sc = find_placement(nr_softmodem, gnb_conf, gnb_conf_args, iq_file, num_re, work_dir)
+    if placement is not None:
+        slot, symbol, start_sc = placement
+    else:
+        print(f"discovering a placement for {num_re} REs...")
+        slot, symbol, start_sc = find_placement(nr_softmodem, gnb_conf, gnb_conf_args, iq_file, num_re, work_dir)
     flags = custom_re_flags(iq_file, num_re, slot, symbol, start_sc)
 
     for attempt in range(1, max_retries + 1):

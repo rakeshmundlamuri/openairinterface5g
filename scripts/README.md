@@ -51,12 +51,25 @@ Also here: `train.py`, `encode_image.py`/`decode_image.py`, `model.py`, `pilot.p
 `cifar_dataset.py`, a `Dockerfile` for cloud/GPU training. Full details, measured PSNR
 results, and honest caveats: **[`doc/JSCC_DEMO.md`](../doc/JSCC_DEMO.md)**.
 
-## Why two scripts
+## `semantic_qam/` — criticality-aware QAM analysis
+
+A third application on the same transport: instead of a payload we train ourselves,
+this one carries pre-computed criticality-aware ("semantic") and Gray-coded
+("standard") QAM symbols exported by
+[THE-TRAIN-LAB/Semantic-QAM](https://github.com/THE-TRAIN-LAB/Semantic-QAM) /
+[THE-TRAIN-LAB/OAI_Demo](https://github.com/THE-TRAIN-LAB/OAI_Demo), and asks whether
+the criticality-aware constellation actually preserves meaning better under noise once
+it's sent over this real pipeline instead of a simulated channel. The main entry point
+is **`semantic_qam/snr_sweep.py`**, which sweeps the channel noise level and compares
+both schemes on label preservation / semantic quality (not just raw symbol error rate
+or PSNR). Full details: **[`semantic_qam/README.md`](semantic_qam/README.md)**.
+
+## Why the transport is separate
 
 `send_recv_signal.py` knows nothing about images, models, or pilots — it moves opaque
-complex numbers through the real PHY and back. `run_demo.py` knows nothing about RF
-launch mechanics, placement discovery, or fading-channel retries — it just encodes,
-calls the transport, and decodes. Keeping them separate means the transport tool is
-reusable for any future payload (a different codec, a raw test signal, criticality-aware
-QAM symbols, ...) without dragging in JSCC-specific code, and the JSCC demo stays
-readable as "the ML part" without RF plumbing mixed in.
+complex numbers through the real PHY and back. Each payload's own code (`jscc/run_demo.py`,
+`semantic_qam/snr_sweep.py`) knows nothing about RF launch mechanics, placement
+discovery, or fading-channel retries — it just encodes/loads symbols, calls the
+transport, and decodes. Keeping them separate is why `semantic_qam/` could reuse the
+transport as-is: a new payload (someone else's exported QAM symbols, in this case)
+without touching `send_recv_signal.py` at all.
