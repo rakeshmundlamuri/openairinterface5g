@@ -41,7 +41,24 @@ does the criticality-aware one actually preserve meaning better under noise?
   real pipeline instead of a simulated channel, and comparing the two constellations
   against each other at each noise level instead of sweeping an adaptive-K agent.
 
+## Setup
+
+Needs a built `nr-softmodem`/`nr-uesoftmodem` (rfsim-enabled) and Python with the
+packages in `requirements.txt` (PyTorch/torchvision, numpy, matplotlib):
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+The first run of any script also downloads that QAM order's bundle (a few MB) from
+THE-TRAIN-LAB/OAI_Demo into `data/` (gitignored) - needs network access once, then it's
+cached.
+
 ## Usage
+
+Run these from inside `scripts/semantic_qam/` (or adjust the relative paths below) with
+the venv above active.
 
 One image, no channel model, both schemes:
 
