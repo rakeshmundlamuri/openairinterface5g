@@ -311,6 +311,13 @@ In the `MACRLCs` section of the gNB/DU configuration file:
   this are not used for pairing, and cached pairs computed from them expire.
   Keep it above the periodic SRS period, otherwise UEs are rarely paired,
   e.g. 80 ms with 16 UEs, a 5 ms TDD period and 30 kHz SCS
+* `srs_thread_pool` (default `"n"`): worker threads for the processing of
+  codebook SRS reports (UL rank, TPMI, MU-MIMO effective channel), in the
+  format of `--thread-pool`: `"n"` processes each report inline in the
+  SRS.indication handler, under the scheduler lock; a list of cores (`-1`: not
+  pinned), e.g. `"-1,-1"`, processes them outside of the lock, and the
+  scheduler applies the results at the start of the next slot. Only read in
+  the first `MACRLCs` entry, the pool is shared by all cells
 
 In the `gNBs` section of the gNB/DU configuration file: some of the parameters
 affect RRC configuration (CellGroupConfig) of a UE, and are therefore listed

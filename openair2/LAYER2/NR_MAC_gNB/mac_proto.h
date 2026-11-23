@@ -182,8 +182,11 @@ nfapi_nr_dl_dci_pdu_t *prepare_dci_pdu(nfapi_nr_dl_tti_pdcch_pdu_rel15_t *pdcch_
 
 void nr_schedule_pucch(gNB_MAC_INST *mac, nr_cell_sched_t *cell, frame_t frameP, slot_t slotP);
 
-void nr_srs_ri_computation(const nfapi_nr_srs_normalized_channel_iq_matrix_t *nr_srs_normalized_channel_iq_matrix,
-                           const NR_UE_UL_BWP_t *current_BWP,
+void nr_srs_ri_computation(const uint8_t *channel_matrix,
+                           const uint16_t num_gnb_antenna_elements,
+                           const uint16_t num_ue_srs_ports,
+                           const uint16_t num_prgs,
+                           const NR_PUSCH_Config_t *pusch_Config,
                            uint8_t *ul_ri);
 
 int get_pucch_resourceid(NR_PUCCH_Config_t *pucch_Config, int O_uci, int pucch_resource);
@@ -390,6 +393,8 @@ void reset_ul_harq_list(NR_UE_sched_ctrl_t *sched_ctrl);
 
 uint8_t *allocate_transportBlock_buffer(byte_array_t *tb, uint32_t needed);
 void free_transportBlock_buffer(byte_array_t *tb);
+
+void nr_mac_apply_srs_results(gNB_MAC_INST *nrmac);
 
 /// coefficient of a UL precoder of TS 38.211 Tables 6.3.1.5-1 to 6.3.1.5-5:
 /// '0', '1', 'n' (-1), 'j' or 'o' (-j)

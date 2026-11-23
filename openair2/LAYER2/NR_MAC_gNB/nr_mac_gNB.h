@@ -23,6 +23,8 @@
 #include "common/utils/ds/spsc_q.h"
 #include "common/utils/ds/hashtable.h"
 #include "common/utils/ds/id_list.h"
+#include "common/utils/threadPool/thread-pool.h"
+#include "common/utils/threadPool/notified_fifo.h"
 #include "openair2/LAYER2/nr_rlc/nr_rlc_configuration.h"
 #include "openair2/LAYER2/NR_MAC_gNB/nr_pos_ue_context.h"
 
@@ -1493,6 +1495,12 @@ typedef struct gNB_MAC_INST_s {
   bool print_ue_stats;
 
   pthread_mutex_t sched_lock;
+
+  /// workers for the SRS report processing (RI, TPMI, effective channel), outside of
+  /// sched_lock; without workers, the reports are processed inline in the SRS.indication handler
+  tpool_t srs_tpool;
+  /// SRS reports processed by srs_tpool, applied by the scheduler at the start of a slot
+  notifiedFIFO_t srs_resp_fifo;
 
   dlul_mac_stats_t mac_stats;
 

@@ -1984,6 +1984,12 @@ void RCconfig_nr_macrlc(configmodule_interface_t *cfg)
 
     nrmac->stats_max_ue = *gpd(macrlc_p, macrlc_np, MACRLC_STATS_MAX_UE)->iptr;
     nrmac->print_ue_stats = nrmac->stats_max_ue > 0;
+    // one pool for all the cells of this MAC
+    if (idx == 0) {
+      char *srs_tpool = *gpd(macrlc_p, macrlc_np, MACRLC_SRS_THREAD_POOL)->strptr;
+      initNamedTpool(srs_tpool, &nrmac->srs_tpool, false, "SRS");
+      LOG_I(NR_MAC, "SRS report processing: %ld worker thread(s)\n", nrmac->srs_tpool.len_thr);
+    }
     config_nr_mac_update_cell(cell, &config, scc->uplinkConfigCommon->initialUplinkBWP, idx, macrlc_p, macrlc_np);
 
   nr_mac_cell_config_scc(cell, scc, &config);

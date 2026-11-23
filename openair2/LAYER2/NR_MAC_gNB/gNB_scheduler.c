@@ -155,6 +155,7 @@ void gNB_dlsch_ulsch_scheduler(gNB_MAC_INST *gNB, nr_cell_sched_t *cell, frame_t
   clear_beam_information(&cell->beam_info, frame, slot, slots_frame);
 
   gNB->frame = frame;
+  nr_mac_apply_srs_results(gNB);
 
   int num_beams = 1;
   if (cell->beam_info.config.bf_method != BF_METHOD_STRAIGHT_WIRE)

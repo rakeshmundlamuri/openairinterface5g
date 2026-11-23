@@ -1591,6 +1591,131 @@ static int nr_srs_tpmi_estimation(const NR_PUSCH_Config_t *pusch_Config,
   return tpmi_sel;
 }
 
+typedef struct {
+  nr_cell_sched_t *cell;
+  rnti_t rnti;
+  fsn_t time;
+  bool compute_eff;
+  long transform_precoding;
+  // copy of the fields read by RI/TPMI: the RRC may replace the UE's PUSCH-Config while a worker runs
+  bool has_pusch_config;
+  NR_PUSCH_Config_t pusch_config;
+  struct NR_PUSCH_Config__ext1 pusch_config_ext1;
+  long tx_config;
+  long max_rank;
+  long codebook_subset;
+  long ul_full_power_tx;
+  uint16_t num_rx;
+  uint16_t num_ports;
+  uint16_t num_prgs;
+  uint8_t *channel_matrix; // [num_ports][num_rx][num_prgs]
+  // results
+  uint8_t ul_ri;
+  uint8_t tpmi;
+  nr_srs_sig_t *sig; // pairing signature
+  time_stats_t ri_timer;
+  time_stats_t tpmi_timer;
+} nr_srs_job_t;
+
+static void nr_srs_job_copy_pusch_config(nr_srs_job_t *job, const NR_PUSCH_Config_t *src)
+{
+  job->has_pusch_config = src != NULL;
+  if (!src)
+    return;
+  NR_PUSCH_Config_t *dst = &job->pusch_config;
+  if (src->txConfig) {
+    job->tx_config = *src->txConfig;
+    dst->txConfig = &job->tx_config;
+  }
+  if (src->maxRank) {
+    job->max_rank = *src->maxRank;
+    dst->maxRank = &job->max_rank;
+  }
+  if (src->codebookSubset) {
+    job->codebook_subset = *src->codebookSubset;
+    dst->codebookSubset = &job->codebook_subset;
+  }
+  if (src->ext1 && src->ext1->ul_FullPowerTransmission_r16) {
+    job->ul_full_power_tx = *src->ext1->ul_FullPowerTransmission_r16;
+    job->pusch_config_ext1.ul_FullPowerTransmission_r16 = &job->ul_full_power_tx;
+    dst->ext1 = &job->pusch_config_ext1;
+  }
+}
+
+static void nr_srs_job_compute(nr_srs_job_t *job)
+{
+  const NR_PUSCH_Config_t *pusch_config = job->has_pusch_config ? &job->pusch_config : NULL;
+
+  start_meas(&job->ri_timer);
+  nr_srs_ri_computation(job->channel_matrix, job->num_rx, job->num_ports, job->num_prgs, pusch_config, &job->ul_ri);
+  stop_meas(&job->ri_timer);
+
+  start_meas(&job->tpmi_timer);
+  job->tpmi = nr_srs_tpmi_estimation(pusch_config,
+                                     job->transform_precoding,
+                                     job->channel_matrix,
+                                     job->num_rx,
+                                     job->num_ports,
+                                     job->num_prgs,
+                                     job->ul_ri);
+  stop_meas(&job->tpmi_timer);
+
+  if (job->compute_eff)
+    job->sig = nr_srs_sig_create((const c16_t *)job->channel_matrix,
+                                 job->num_prgs,
+                                 job->num_rx,
+                                 job->num_ports,
+                                 job->ul_ri,
+                                 job->transform_precoding,
+                                 job->tpmi);
+}
+
+static void nr_srs_job_task(void *arg)
+{
+  notifiedFIFO_elt_t *elt = arg;
+  nr_srs_job_compute(NotifiedFifoData(elt));
+  pushNotifiedFIFO(elt->reponseFifo, elt);
+}
+
+static void nr_srs_job_apply(gNB_MAC_INST *nrmac, nr_srs_job_t *job)
+{
+  nr_cell_sched_t *cell = job->cell;
+  merge_meas(&cell->nr_srs_ri_computation_timer, &job->ri_timer);
+  merge_meas(&cell->nr_srs_tpmi_computation_timer, &job->tpmi_timer);
+  NR_UE_info_t *UE = find_connected_nr_ue(&nrmac->UE_info, job->rnti);
+  if (!UE) {
+    nr_srs_sig_free(job->sig);
+    return;
+  }
+
+  NR_UE_sched_ctrl_t *sched_ctrl = &UE->UE_sched_ctrl;
+  sched_ctrl->srs_feedback.sri = NR_SRS_SRI_0;
+  sched_ctrl->srs_feedback.ul_ri = job->ul_ri;
+  sched_ctrl->srs_feedback.tpmi = job->tpmi;
+  sprintf(UE->mac_stats.srs_stats, "UL-RI %d, TPMI %d", job->ul_ri + 1, job->tpmi);
+
+  if (!job->compute_eff)
+    return;
+  nr_srs_eff_channel_info_t *srs_eff = &sched_ctrl->srs_eff_channel_info;
+  nr_srs_sig_free(srs_eff->sig);
+  *srs_eff = (nr_srs_eff_channel_info_t){.valid = job->sig != NULL,
+                                         .time = job->time,
+                                         .num_layers = job->ul_ri + 1,
+                                         .num_rx = job->num_rx,
+                                         .num_prg = job->num_prgs,
+                                         .sig = job->sig};
+  nr_mu_update_pair_cache(nrmac, cell, UE);
+}
+
+void nr_mac_apply_srs_results(gNB_MAC_INST *nrmac)
+{
+  notifiedFIFO_elt_t *elt;
+  while ((elt = pollNotifiedFIFO(&nrmac->srs_resp_fifo)) != NULL) {
+    nr_srs_job_apply(nrmac, NotifiedFifoData(elt));
+    delNotifiedFIFO_elt(elt);
+  }
+}
+
 void handle_nr_srs_measurements(gNB_MAC_INST *nrmac,
                                 nr_cell_sched_t *cell,
                                 const frame_t frame,
@@ -1708,48 +1833,32 @@ void handle_nr_srs_measurements(gNB_MAC_INST *nrmac,
       }
 #endif
 
-      NR_UE_sched_ctrl_t *sched_ctrl = &UE->UE_sched_ctrl;
-      NR_UE_UL_BWP_t *current_BWP = &UE->current_UL_BWP;
-      sched_ctrl->srs_feedback.sri = NR_SRS_SRI_0;
-
-      start_meas(&cell->nr_srs_ri_computation_timer);
-      nr_srs_ri_computation(&nr_srs_channel_iq_matrix, current_BWP, &sched_ctrl->srs_feedback.ul_ri);
-      stop_meas(&cell->nr_srs_ri_computation_timer);
-
-      start_meas(&cell->nr_srs_tpmi_computation_timer);
-      sched_ctrl->srs_feedback.tpmi = nr_srs_tpmi_estimation(current_BWP->pusch_Config,
-                                                             current_BWP->transform_precoding,
-                                                             nr_srs_channel_iq_matrix.channel_matrix,
-                                                             nr_srs_channel_iq_matrix.num_gnb_antenna_elements,
-                                                             nr_srs_channel_iq_matrix.num_ue_srs_ports,
-                                                             nr_srs_channel_iq_matrix.num_prgs,
-                                                             sched_ctrl->srs_feedback.ul_ri);
-      stop_meas(&cell->nr_srs_tpmi_computation_timer);
-
-      sprintf(stats->srs_stats, "UL-RI %d, TPMI %d", sched_ctrl->srs_feedback.ul_ri + 1, sched_ctrl->srs_feedback.tpmi);
-
-      if (!cell->radio_config.ul_mu_mimo)
-        break;
-
-      const uint8_t ul_ri = sched_ctrl->srs_feedback.ul_ri;
       const uint16_t num_rx = nr_srs_channel_iq_matrix.num_gnb_antenna_elements;
+      const uint16_t num_ports = nr_srs_channel_iq_matrix.num_ue_srs_ports;
       const uint16_t num_prgs = nr_srs_channel_iq_matrix.num_prgs;
-      nr_srs_sig_t *sig = nr_srs_sig_create((const c16_t *)nr_srs_channel_iq_matrix.channel_matrix,
-                                            num_prgs,
-                                            num_rx,
-                                            nr_srs_channel_iq_matrix.num_ue_srs_ports,
-                                            ul_ri,
-                                            current_BWP->transform_precoding,
-                                            sched_ctrl->srs_feedback.tpmi);
-      nr_srs_eff_channel_info_t *srs_eff = &sched_ctrl->srs_eff_channel_info;
-      nr_srs_sig_free(srs_eff->sig);
-      *srs_eff = (nr_srs_eff_channel_info_t){.valid = sig != NULL,
-                                             .time = {.f = frame, .s = slot, .mu = current_BWP->scs},
-                                             .num_layers = ul_ri + 1,
-                                             .num_rx = num_rx,
-                                             .num_prg = num_prgs,
-                                             .sig = sig};
-      nr_mu_update_pair_cache(nrmac, cell, UE);
+      // RI and TPMI read the matrix as c16_t
+      const size_t matrix_size = (size_t)num_ports * num_rx * num_prgs * sizeof(c16_t);
+      notifiedFIFO_elt_t *elt = newNotifiedFIFO_elt(sizeof(nr_srs_job_t) + matrix_size, 0, &nrmac->srs_resp_fifo, nr_srs_job_task);
+      nr_srs_job_t *job = NotifiedFifoData(elt);
+      memset(job, 0, sizeof(*job));
+      job->channel_matrix = (uint8_t *)(job + 1);
+      memcpy(job->channel_matrix, nr_srs_channel_iq_matrix.channel_matrix, matrix_size);
+      job->cell = cell;
+      job->rnti = UE->rnti;
+      job->time = (fsn_t){.f = frame, .s = slot, .mu = UE->current_UL_BWP.scs};
+      job->compute_eff = cell->radio_config.ul_mu_mimo;
+      job->transform_precoding = UE->current_UL_BWP.transform_precoding;
+      nr_srs_job_copy_pusch_config(job, UE->current_UL_BWP.pusch_Config);
+      job->num_rx = num_rx;
+      job->num_ports = num_ports;
+      job->num_prgs = num_prgs;
+      if (nrmac->srs_tpool.len_thr > 0) {
+        pushTpool(&nrmac->srs_tpool, (task_t){.func = nr_srs_job_task, .args = elt});
+      } else {
+        nr_srs_job_compute(job);
+        nr_srs_job_apply(nrmac, job);
+        delNotifiedFIFO_elt(elt);
+      }
       break;
     }
 

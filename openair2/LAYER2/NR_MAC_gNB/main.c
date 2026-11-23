@@ -266,6 +266,7 @@ gNB_MAC_INST *mac_top_init_gNB(ngran_node_t node_type, const nr_rlc_configuratio
   nrmac->print_ue_stats = true;
 
   pthread_mutex_init(&nrmac->sched_lock, NULL);
+  initNotifiedFIFO(&nrmac->srs_resp_fifo);
 
   uid_linear_allocator_init(&nrmac->UE_info.uid_allocator);
   seq_arr_init(&nrmac->pos_act_ue_arr, sizeof(positioning_activation_info_t));
@@ -345,6 +346,10 @@ void mac_top_destroy_gNB(gNB_MAC_INST *mac)
 {
   mac->stats_thread_exit = true;
   pthread_join(mac->stats_thread, NULL);
+  if (mac->srs_tpool.len_thr > 0)
+    abortTpool(&mac->srs_tpool);
+  // releases the results still queued
+  nr_mac_apply_srs_results(mac);
   NR_UEs_t *UE_info = &mac->UE_info;
   hashtable_destroy(&UE_info->connected_ues, delete_nr_ue_data);
   seq_arr_free(&UE_info->connected_ues_list, NULL);

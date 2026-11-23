@@ -182,29 +182,27 @@ void matrix_rank_128bits(int row, int col, simde__m128i mat[4])
   }
 }
 
-void nr_srs_ri_computation(const nfapi_nr_srs_normalized_channel_iq_matrix_t *nr_srs_normalized_channel_iq_matrix,
-                           const NR_UE_UL_BWP_t *current_BWP,
+void nr_srs_ri_computation(const uint8_t *channel_matrix,
+                           const uint16_t num_gnb_antenna_elements,
+                           const uint16_t num_ue_srs_ports,
+                           const uint16_t num_prgs,
+                           const NR_PUSCH_Config_t *pusch_Config,
                            uint8_t *ul_ri)
 {
 #ifdef SRS_DEBUG
-  LOG_I(NR_MAC, "num_gnb_antenna_elements = %i\n", nr_srs_normalized_channel_iq_matrix->num_gnb_antenna_elements);
-  LOG_I(NR_MAC, "num_ue_srs_ports = %i\n", nr_srs_normalized_channel_iq_matrix->num_ue_srs_ports);
+  LOG_I(NR_MAC, "num_gnb_antenna_elements = %i\n", num_gnb_antenna_elements);
+  LOG_I(NR_MAC, "num_ue_srs_ports = %i\n", num_ue_srs_ports);
 #endif
 
-  if (nr_srs_normalized_channel_iq_matrix->num_gnb_antenna_elements == 1 ||
-      nr_srs_normalized_channel_iq_matrix->num_ue_srs_ports == 1 ||
-      current_BWP->pusch_Config == NULL ||
-      (current_BWP->pusch_Config && *current_BWP->pusch_Config->maxRank == 1)) {
+  if (num_gnb_antenna_elements == 1 || num_ue_srs_ports == 1 || pusch_Config == NULL || *pusch_Config->maxRank == 1) {
     *ul_ri = 0;
     return;
   }
 
-  const c16_t *ch = (c16_t *)nr_srs_normalized_channel_iq_matrix->channel_matrix;
-  const uint16_t num_gnb_antenna_elements = nr_srs_normalized_channel_iq_matrix->num_gnb_antenna_elements;
-  const uint16_t num_prgs = nr_srs_normalized_channel_iq_matrix->num_prgs;
+  const c16_t *ch = (const c16_t *)channel_matrix;
 
   int row = num_gnb_antenna_elements;
-  int col = nr_srs_normalized_channel_iq_matrix->num_ue_srs_ports;
+  int col = num_ue_srs_ports;
   simde__m128i mat_real128[4];
   simde__m128i mat_imag128[4];
   simde__m128i sum_matrix[4];

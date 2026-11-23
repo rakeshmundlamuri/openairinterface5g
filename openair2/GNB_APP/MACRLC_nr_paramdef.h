@@ -62,6 +62,7 @@
 #define MACRLC_UL_MU_MIMO_CORR_THRESHOLD "ul_mu_mimo_corr_threshold"
 #define MACRLC_UL_MU_MIMO_PF_BIAS "ul_mu_mimo_pf_bias"
 #define MACRLC_UL_MU_MIMO_SRS_MAX_AGE "ul_mu_mimo_srs_max_age_ms"
+#define MACRLC_SRS_THREAD_POOL "srs_thread_pool"
 
 #define HLP_MACRLC_UL_PRBBLACK "SNR threshold to decide whether a PRB will be blacklisted or not"
 #define HLP_MACRLC_DL_BLER_UP "Upper threshold of BLER to decrease DL MCS"
@@ -91,6 +92,8 @@
 #define HLP_MACRLC_UL_MU_MIMO_CORR_THRESHOLD "UL MU-MIMO: maximum SRS channel cross-correlation (0..1) of two UEs to pair them"
 #define HLP_MACRLC_UL_MU_MIMO_PF_BIAS "UL MU-MIMO: factor (>= 1) on the proportional-fair weight of paired UEs"
 #define HLP_MACRLC_UL_MU_MIMO_SRS_MAX_AGE "UL MU-MIMO: maximum age in ms of an SRS channel estimate used for pairing"
+#define HLP_MACRLC_SRS_THREAD_POOL \
+  "SRS report processing threads, as --thread-pool: \"n\" processes inline, else one core per thread (-1: not pinned)"
 
 /*-------------------------------------------------------------------------------------------------------------------------------------------------------*/
 /*                                            MacRLC  configuration parameters                                                                           */
@@ -150,6 +153,8 @@
                                                                                0, .dblptr=NULL, .defdblval=1.5,             TYPE_DOUBLE,  0}, \
   {MACRLC_UL_MU_MIMO_SRS_MAX_AGE,      HLP_MACRLC_UL_MU_MIMO_SRS_MAX_AGE, \
                                                                                0, .iptr=NULL,   .defintval=160,             TYPE_INT,     0}, \
+  {MACRLC_SRS_THREAD_POOL,             HLP_MACRLC_SRS_THREAD_POOL, \
+                                                                               0, .strptr=NULL, .defstrval="n",             TYPE_STRING,  0}, \
 }
 // clang-format off
 
@@ -203,6 +208,7 @@
   { .s5 = { NULL } }, /* UL MU-MIMO correlation threshold */ \
   { .s5 = { NULL } }, /* UL MU-MIMO PF bias */ \
   { .s2 = { config_check_intrange, {1, 10240}} }, /* UL MU-MIMO SRS max age */ \
+  { .s5 = { NULL } }, /* SRS thread pool */ \
 }
 
 /*---------------------------------------------------------------------------------------------------------------------------------------------------------*/
